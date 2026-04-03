@@ -621,7 +621,7 @@ export const assignLead = async (req: any, res: Response) => {
     // Emit socket event for each successful assignment.
     if (assignedAgentId) {
       const io = req.app.get('socketio');
-      io.to(assignedAgentId).emit('new_lead', { leadId: lead._id, name: lead.name });
+      io?.to?.(String(assignedAgentId))?.emit?.('new_lead', { leadId: lead._id, name: lead.name });
     }
 
     res.json(lead);
@@ -654,7 +654,7 @@ export const createLead = async (req: any, res: Response) => {
     
     if (assignedAgentId) {
       const io = req.app.get('socketio');
-      io.to(assignedAgentId).emit('new_lead', { leadId: lead._id, name });
+      io?.to?.(String(assignedAgentId))?.emit?.('new_lead', { leadId: lead._id, name });
     }
 
     res.status(201).json(lead);
@@ -772,7 +772,7 @@ export const bulkTransferLeads = async (req: any, res: Response) => {
       });
 
       await lead.save();
-      io.to(agentId).emit('new_lead', { leadId: lead._id, name: lead.name });
+      io?.to?.(String(agentId))?.emit?.('new_lead', { leadId: lead._id, name: lead.name });
       updated.push(lead);
     }
 
@@ -819,7 +819,7 @@ export const bulkAssignLeads = async (req: any, res: Response) => {
 
       await lead.save();
       if (assignedAgentId) {
-        io.to(assignedAgentId).emit('new_lead', { leadId: lead._id, name: lead.name });
+        io?.to?.(String(assignedAgentId))?.emit?.('new_lead', { leadId: lead._id, name: lead.name });
       }
       updated.push(lead);
     }
@@ -910,7 +910,7 @@ export const assignUnassignedLeadsEqually = async (req: any, res: Response) => {
         });
 
         await lead.save();
-        io.to(alloc.agentId.toString()).emit('new_lead', { leadId: lead._id, name: lead.name });
+        io?.to?.(alloc.agentId.toString())?.emit?.('new_lead', { leadId: lead._id, name: lead.name });
         updated.push(lead);
       }
     }

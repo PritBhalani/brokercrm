@@ -1,5 +1,7 @@
 import express from 'express';
 import multer from 'multer';
+import os from 'os';
+import path from 'path';
 import { 
   getLeads, 
   getLeadById, 
@@ -23,7 +25,8 @@ import { protect, authorize } from '../middleware/auth.ts';
 import { processCSV } from '../utils/csvUploader.ts';
 
 const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
+const uploadDir = path.join(os.tmpdir(), 'broker-crm-csv');
+const upload = multer({ dest: uploadDir });
 
 router.get('/', protect, getLeads);
 router.post('/', protect, authorize('admin'), createLead);
