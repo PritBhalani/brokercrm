@@ -1,0 +1,1 @@
+﻿server/middleware/auth.ts(29,21): error TS2339: Property 'officeHoursLocked' does not exist on type 'Document<unknown, {}, { updatedAt: NativeDate; officeStartTime: string; officeEndTime: string; isLocked: boolean; }, { id: string; }, DefaultSchemaOptions> & Omit<...> & { ...; }'.

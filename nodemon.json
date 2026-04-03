@@ -1,0 +1,6 @@
+{
+  "watch": ["server.ts", "server", "vite.config.ts"],
+  "ext": "ts,json",
+  "ignore": ["node_modules", "dist", "uploads", "src", "*.log"],
+  "delay": 400
+}

@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  /* Dynamic App Theme Variables (Fully Dark) */
+  --color-app-root: var(--color-slate-950);
+  --color-app-surface: var(--color-slate-900);
+  --color-app-surface-hover: var(--color-slate-800);
+  
+  --color-app-border: var(--color-slate-800);
+  --color-app-border-light: var(--color-slate-700);
+
+  --color-app-text: var(--color-slate-200);
+  --color-app-text-muted: var(--color-slate-400);
+  --color-app-text-active: var(--color-white);
+}
+
+@layer base {
+  body {
+    background-color: var(--color-app-root);
+    color: var(--color-app-text);
+  }
+}

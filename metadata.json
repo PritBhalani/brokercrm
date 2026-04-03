@@ -1,0 +1,5 @@
+{
+  "name": "StockBroker CRM",
+  "description": "A production-ready CRM for stockbroker calling teams featuring lead management, agent assignment, and real-time notifications.",
+  "requestFramePermissions": []
+}
