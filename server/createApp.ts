@@ -26,11 +26,15 @@ export function createApp() {
       next();
     } catch (e) {
       console.error('MongoDB connection error:', e);
+      const raw = e instanceof Error ? e.message : String(e);
       const hint =
         e instanceof Error && e.message.includes('MONGODB_URI')
           ? e.message
-          : 'Database unavailable. Check MONGODB_URI on Vercel and Atlas Network Access (allow 0.0.0.0/0).';
-      res.status(500).json({ message: hint });
+          : 'Database unavailable. Check MONGODB_URI on Vercel and Atlas Network Access (allow 0.0.0.0/0). If the DB password has @ # : / ? use URL-encoded characters in the URI.';
+      res.status(500).json({
+        message: hint,
+        ...(process.env.VERCEL_DEBUG === '1' && { detail: raw }),
+      });
     }
   });
 

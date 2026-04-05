@@ -10,18 +10,23 @@ const generateToken = (id: string) => {
 export const loginUser = async (req: Request, res: Response) => {
   const { email, password } = req.body;
   try {
-    const user = await User.findOne({ email });
-    
+    if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+
+    const emailTrim = email.trim();
+    const user = await User.findOne({ email: emailTrim });
+
     if (!user) {
       // Bootstrap the first admin if it's the owner's email and no users exist
       const userCount = await User.countDocuments();
-      
-      if (userCount === 0 && email === "pprit746@gmail.com") {
+
+      if (userCount === 0 && emailTrim === 'pprit746@gmail.com') {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         const newUser = await User.create({
           name: 'Super Admin',
-          email,
+          email: emailTrim,
           password: hashedPassword,
           role: 'admin',
           isActive: true
@@ -36,6 +41,10 @@ export const loginUser = async (req: Request, res: Response) => {
         });
       }
       
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    if (!user.password || typeof user.password !== 'string') {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
@@ -91,7 +100,12 @@ export const loginUser = async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Server error' });
+    const detail = error instanceof Error ? error.message : String(error);
+    const showDetail = process.env.VERCEL_DEBUG === '1';
+    res.status(500).json({
+      message: 'Server error',
+      ...(showDetail && { detail }),
+    });
   }
 };
 
