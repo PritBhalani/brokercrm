@@ -12,8 +12,7 @@
 
 1. Create a **Web Service** connected to this repository.
 2. **Root directory:** repository root (same `package.json` as the Express app).
-3. **Build command:** use **`npm ci`** only (or **`npm install`**).  
-   **Do not** run **`npm run build`** on Render. That runs Vite, but Vite is a **devDependency**. Render sets `NODE_ENV=production` during install, so devDependencies are skipped and `vite` is missing → `vite: not found`. The API does not need a frontend bundle; **Vercel** builds the React app.
+3. **Build command:** **`npm ci`** or **`npm install`** is enough. If your dashboard still runs **`npm run build`**, that is OK: the **`build`** script skips Vite when it is not installed (production installs omit devDependencies). The API does not need a frontend bundle; **Vercel** builds the React app.
 4. **Start command:** `npm start`  
    This runs `tsx server.ts`, which listens on `process.env.PORT` and `0.0.0.0`.
 5. Optional: connect this repo’s **`render.yaml`** as a Blueprint so build/start stay correct.

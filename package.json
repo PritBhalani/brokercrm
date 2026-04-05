@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "nodemon --exec tsx server.ts",
     "dev:plain": "tsx server.ts",
-    "build": "vite build",
+    "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

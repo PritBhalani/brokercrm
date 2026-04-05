@@ -1,5 +1,4 @@
-# Render Blueprint — API only (no Vite build here; frontend builds on Vercel).
-# Do not use `npm run build` on Render: vite lives in devDependencies and is omitted when NODE_ENV=production.
+# Render Blueprint — API service. `npm run build` skips Vite if devDependencies are omitted.
 
 services:
   - type: web
