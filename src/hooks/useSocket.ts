@@ -14,7 +14,8 @@ export const useSocket = () => {
         Notification.requestPermission();
       }
 
-      const socket = io();
+      const apiOrigin = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+      const socket = io(apiOrigin || undefined, { path: '/socket.io/' });
       socket.emit('join', user._id);
 
       socket.on('new_lead', (data) => {

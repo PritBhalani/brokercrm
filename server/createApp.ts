@@ -10,7 +10,14 @@ import { connectDb } from './dbConnect.ts';
 export function createApp() {
   const app = express();
 
-  app.use(cors());
+  const corsList = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
+  app.use(
+    cors({
+      origin: corsList?.length ? corsList : true,
+      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    })
+  );
   app.use(express.json());
 
   app.set('socketio', null);
