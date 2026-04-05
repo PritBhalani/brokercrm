@@ -4,7 +4,7 @@
  * Usage (from project root):
  *   npx tsx scripts/migrate-unset-lastCallStatus.ts
  *
- * Requires MONGODB_URI in .env (same as the app), or defaults to mongodb://localhost:27017/brokercrm
+ * Requires MONGODB_URI in .env (same as the app; e.g. MongoDB Atlas).
  *
  * Dry run (count only, no writes):
  *   DRY_RUN=1 npx tsx scripts/migrate-unset-lastCallStatus.ts
@@ -19,7 +19,11 @@ dotenv.config();
 const COLLECTION = 'leads';
 
 async function main() {
-  const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/brokercrm';
+  const uri = process.env.MONGODB_URI?.trim();
+  if (!uri) {
+    console.error('Set MONGODB_URI in .env (e.g. Atlas connection string).');
+    process.exit(1);
+  }
   const dryRun = process.env.DRY_RUN === '1' || process.env.DRY_RUN === 'true';
 
   await mongoose.connect(uri);

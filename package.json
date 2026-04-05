@@ -14,7 +14,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "migrate:unset-last-call-status": "tsx scripts/migrate-unset-lastCallStatus.ts",
-    "start": "node server.ts"
+    "start": "tsx server.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
@@ -41,7 +41,8 @@
     "serverless-http": "^4.0.0",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.5.0",
+    "tsx": "^4.21.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -57,7 +58,6 @@
     "autoprefixer": "^10.4.21",
     "nodemon": "^3.1.9",
     "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.0"
   }

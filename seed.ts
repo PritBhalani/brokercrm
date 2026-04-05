@@ -7,7 +7,12 @@ dotenv.config();
 
 const seed = async () => {
   try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/crm_db');
+    const uri = process.env.MONGODB_URI?.trim();
+    if (!uri) {
+      console.error('Set MONGODB_URI in .env (e.g. Atlas connection string).');
+      process.exit(1);
+    }
+    await mongoose.connect(uri);
     console.log('Connected to MongoDB');
 
     // Clear existing data

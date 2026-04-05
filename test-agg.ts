@@ -5,7 +5,12 @@ import { User } from './server/models/Models.ts';
 dotenv.config();
 
 async function test() {
-  await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/crm');
+  const uri = process.env.MONGODB_URI?.trim();
+  if (!uri) {
+    console.error('Set MONGODB_URI in .env (e.g. Atlas connection string).');
+    process.exit(1);
+  }
+  await mongoose.connect(uri);
   const todayStr = new Date().toISOString().split('T')[0];
   const startOfDay = new Date(todayStr + 'T00:00:00Z');
   const endOfDay = new Date(todayStr + 'T23:59:59Z');

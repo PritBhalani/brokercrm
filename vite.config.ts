@@ -7,6 +7,8 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
+    // Allow CRA-style REACT_APP_* for API URL (see src/config/apiOrigin.ts)
+    envPrefix: ['VITE_', 'REACT_APP_'],
     // Keep Vite's dep cache outside the repo so file watchers (tsx/nodemon) never see churn under node_modules/.vite
     cacheDir: path.join(os.tmpdir(), 'broker-crm-vite-cache'),
     build: {
@@ -27,7 +29,7 @@ export default defineConfig(({mode}) => {
       // (`npm run dev` / `tsx server.ts` on 3000). Without this, `/api/*` returns index.html.
       proxy: {
         '/api': {
-          target: 'http://localhost:3000',
+          target: process.env.VITE_DEV_API_PROXY_TARGET || 'http://127.0.0.1:3000',
           changeOrigin: true,
         },
       },

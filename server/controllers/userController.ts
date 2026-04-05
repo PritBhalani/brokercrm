@@ -2,9 +2,10 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { User, Lead, SystemSettings, Attendance } from '../models/Models.ts';
+import { getJwtSecret } from '../config/secrets.ts';
 
 const generateToken = (id: string) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '30d' });
+  return jwt.sign({ id }, getJwtSecret(), { expiresIn: '30d' });
 };
 
 export const loginUser = async (req: Request, res: Response) => {

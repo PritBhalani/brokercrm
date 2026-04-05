@@ -6,18 +6,13 @@ import notificationRoutes from './routes/notificationRoutes.ts';
 import adminRoutes from './routes/adminRoutes.ts';
 import dailyReportRoutes from './routes/dailyReportRoutes.ts';
 import { connectDb } from './dbConnect.ts';
+import { getExpressCorsOptions } from './config/cors.ts';
 
 export function createApp() {
   const app = express();
+  app.set('trust proxy', 1);
 
-  const corsList = process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean);
-  app.use(
-    cors({
-      origin: corsList?.length ? corsList : true,
-      credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
-    })
-  );
+  app.use(cors(getExpressCorsOptions()));
   app.use(express.json());
 
   app.set('socketio', null);
@@ -37,10 +32,12 @@ export function createApp() {
       const hint =
         e instanceof Error && e.message.includes('MONGODB_URI')
           ? e.message
-          : 'Database unavailable. Check MONGODB_URI on Vercel and Atlas Network Access (allow 0.0.0.0/0). If the DB password has @ # : / ? use URL-encoded characters in the URI.';
+          : 'Database unavailable. Check MONGODB_URI on your host (e.g. Render) and Atlas Network Access (allow 0.0.0.0/0). If the DB password has @ # : / ? use URL-encoded characters in the URI.';
+      const debug =
+        process.env.DEBUG_API_ERRORS === '1' || process.env.VERCEL_DEBUG === '1';
       res.status(500).json({
         message: hint,
-        ...(process.env.VERCEL_DEBUG === '1' && { detail: raw }),
+        ...(debug && { detail: raw }),
       });
     }
   });

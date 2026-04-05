@@ -7,14 +7,25 @@ import { createServer as createViteServer } from 'vite';
 import { createApp } from './server/createApp.ts';
 import { connectDb } from './server/dbConnect.ts';
 import { initCronJobs } from './server/utils/cronJobs.ts';
+import { getSocketIoCorsOrigin } from './server/config/cors.ts';
+
+function assertProductionJwtSecret() {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (!process.env.JWT_SECRET?.trim()) {
+    console.error('[FATAL] JWT_SECRET is required when NODE_ENV=production');
+    process.exit(1);
+  }
+}
 
 async function startServer() {
+  assertProductionJwtSecret();
+
   try {
     await connectDb();
     console.log('MongoDB connected');
   } catch (err) {
     console.warn(
-      '[MongoDB] Startup connection failed. Set MONGODB_URI in .env (e.g. Atlas) or start MongoDB on localhost:27017. API routes will return errors until the database is reachable.'
+      '[MongoDB] Startup connection failed. Set MONGODB_URI in .env (e.g. MongoDB Atlas). API routes will return errors until the database is reachable.'
     );
     console.warn(err instanceof Error ? err.message : err);
   }
@@ -23,11 +34,14 @@ async function startServer() {
   const server = http.createServer(app);
   const io = new Server(server, {
     cors: {
-      origin: true,
-      methods: ['GET', 'POST'],
+      origin: getSocketIoCorsOrigin(),
+      methods: ['GET', 'POST', 'OPTIONS'],
       credentials: true,
       allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
     },
+    transports: ['websocket', 'polling'],
+    pingTimeout: 60_000,
+    pingInterval: 25_000,
   });
 
   app.set('socketio', io);
@@ -41,7 +55,7 @@ async function startServer() {
 
   initCronJobs();
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -58,7 +72,9 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    const publicUrl = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL;
+    console.log(`HTTP + Socket.io listening on 0.0.0.0:${PORT}`);
+    if (publicUrl) console.log(`Public URL: ${publicUrl}`);
   });
 }
 

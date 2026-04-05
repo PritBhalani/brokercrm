@@ -7,7 +7,7 @@ export async function connectDb(): Promise<void> {
   const uri = process.env.MONGODB_URI?.trim();
   if (!uri) {
     throw new Error(
-      'MONGODB_URI is not set. Add it in Vercel → Project → Settings → Environment Variables (Production + Preview).'
+      'MONGODB_URI is not set. Add it in your host environment (e.g. Render) or in a local .env file.'
     );
   }
 

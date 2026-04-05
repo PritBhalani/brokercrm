@@ -5,7 +5,11 @@ dotenv.config();
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/brokercrm');
+    const uri = process.env.MONGODB_URI?.trim();
+    if (!uri) {
+      throw new Error('MONGODB_URI is not set');
+    }
+    const conn = await mongoose.connect(uri);
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error: any) {
     console.error(`Error: ${error.message}`);

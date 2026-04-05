@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useNotifications } from '../context/NotificationContext.tsx';
+import { getApiOrigin, isNgrokApiOrigin } from '../config/apiOrigin.ts';
 
 export const useSocket = () => {
   const { user } = useAuth();
@@ -14,13 +15,17 @@ export const useSocket = () => {
         Notification.requestPermission();
       }
 
-      const apiOrigin = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-      const isNgrok = Boolean(apiOrigin && /ngrok/i.test(apiOrigin));
+      const apiOrigin = getApiOrigin();
+      const isNgrok = isNgrokApiOrigin(apiOrigin);
       const socket = io(apiOrigin || undefined, {
         path: '/socket.io/',
-        // Free ngrok returns HTML on polling XHR (no CORS). Prefer WebSocket first.
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+        timeout: 20000,
         ...(isNgrok && {
-          transports: ['websocket', 'polling'],
           transportOptions: {
             polling: {
               extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
