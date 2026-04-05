@@ -1,0 +1,12 @@
+# Render Blueprint — API only (no Vite build here; frontend builds on Vercel).
+# Do not use `npm run build` on Render: vite lives in devDependencies and is omitted when NODE_ENV=production.
+
+services:
+  - type: web
+    name: brokercrm-api
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production

@@ -12,17 +12,25 @@
 
 1. Create a **Web Service** connected to this repository.
 2. **Root directory:** repository root (same `package.json` as the Express app).
-3. **Build command** (optional if you only need the API; the frontend build is for Vercel):  
-   `npm ci && npm run build`  
-   Or install only: `npm ci`
+3. **Build command:** use **`npm ci`** only (or **`npm install`**).  
+   **Do not** run **`npm run build`** on Render. That runs Vite, but Vite is a **devDependency**. Render sets `NODE_ENV=production` during install, so devDependencies are skipped and `vite` is missing → `vite: not found`. The API does not need a frontend bundle; **Vercel** builds the React app.
 4. **Start command:** `npm start`  
    This runs `tsx server.ts`, which listens on `process.env.PORT` and `0.0.0.0`.
-5. **Environment variables:** copy from `backend.env.example` and set at least:
+5. Optional: connect this repo’s **`render.yaml`** as a Blueprint so build/start stay correct.
+6. **Environment variables:** copy from `backend.env.example` and set at least:
    - `MONGODB_URI` — Atlas connection string (Network Access: allow Render’s IPs or `0.0.0.0/0` for simplicity).
    - `JWT_SECRET` — long random string (required when `NODE_ENV=production`).
    - `CORS_ORIGINS` or `FRONTEND_URL` — your Vercel site origin(s), comma-separated for multiple.
    - `NODE_ENV=production`
-6. Render injects `PORT`; do not hardcode it. Optional: `RENDER_EXTERNAL_URL` is logged if present.
+7. Render injects `PORT`; do not hardcode it. Optional: `RENDER_EXTERNAL_URL` is logged if present.
+
+### If you really must run `vite build` on Render
+
+Prefer building the UI on Vercel. If you need a full install including devDependencies:
+
+`npm ci --include=dev && npm run build`
+
+(or set `NODE_ENV=development` only for the install step — not ideal for production images.)
 
 ## Frontend (Vercel)
 
