@@ -15,13 +15,22 @@ export function createApp() {
 
   app.set('socketio', null);
 
+  /** No DB — use to verify Vercel routing before fixing Mongo env. */
+  app.get('/api/health', (_req, res) => {
+    res.json({ ok: true, service: 'broker-crm' });
+  });
+
   app.use(async (req, res, next) => {
     try {
       await connectDb();
       next();
     } catch (e) {
       console.error('MongoDB connection error:', e);
-      res.status(500).json({ message: 'Database unavailable' });
+      const hint =
+        e instanceof Error && e.message.includes('MONGODB_URI')
+          ? e.message
+          : 'Database unavailable. Check MONGODB_URI on Vercel and Atlas Network Access (allow 0.0.0.0/0).';
+      res.status(500).json({ message: hint });
     }
   });
 
