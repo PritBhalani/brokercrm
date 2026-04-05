@@ -7,14 +7,18 @@ import axios from 'axios';
 const origin = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
 const baseURL = origin ? `${origin.replace(/\/$/, '')}/api` : '/api';
 
-const api = axios.create({
-  baseURL,
-});
+/** Free ngrok serves a browser warning HTML without CORS unless this header is sent. */
+const isNgrokTunnel = Boolean(origin && /ngrok/i.test(origin));
+
+const api = axios.create({ baseURL });
 
 api.interceptors.request.use((config) => {
   const token = sessionStorage.getItem('token') || localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (isNgrokTunnel) {
+    config.headers['ngrok-skip-browser-warning'] = 'true';
   }
   return config;
 });

@@ -15,7 +15,19 @@ export const useSocket = () => {
       }
 
       const apiOrigin = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
-      const socket = io(apiOrigin || undefined, { path: '/socket.io/' });
+      const isNgrok = Boolean(apiOrigin && /ngrok/i.test(apiOrigin));
+      const socket = io(apiOrigin || undefined, {
+        path: '/socket.io/',
+        // Free ngrok returns HTML on polling XHR (no CORS). Prefer WebSocket first.
+        ...(isNgrok && {
+          transports: ['websocket', 'polling'],
+          transportOptions: {
+            polling: {
+              extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
+            },
+          },
+        }),
+      });
       socket.emit('join', user._id);
 
       socket.on('new_lead', (data) => {

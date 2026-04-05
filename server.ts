@@ -22,7 +22,12 @@ async function startServer() {
   const app = createApp();
   const server = http.createServer(app);
   const io = new Server(server, {
-    cors: { origin: '*' },
+    cors: {
+      origin: true,
+      methods: ['GET', 'POST'],
+      credentials: true,
+      allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+    },
   });
 
   app.set('socketio', io);
