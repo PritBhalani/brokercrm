@@ -1,18 +1,19 @@
 import 'dotenv/config';
 import http from 'http';
+import { existsSync } from 'fs';
 import { Server } from 'socket.io';
 import path from 'path';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { createApp } from './server/createApp.ts';
 import { connectDb } from './server/dbConnect.ts';
 import { initCronJobs } from './server/utils/cronJobs.ts';
 import { getSocketIoCorsOrigin } from './server/config/cors.ts';
+import { isProductionRuntime } from './server/config/runtime.ts';
 
 function assertProductionJwtSecret() {
-  if (process.env.NODE_ENV !== 'production') return;
+  if (!isProductionRuntime()) return;
   if (!process.env.JWT_SECRET?.trim()) {
-    console.error('[FATAL] JWT_SECRET is required when NODE_ENV=production');
+    console.error('[FATAL] JWT_SECRET is required in production (NODE_ENV=production or RENDER=true)');
     process.exit(1);
   }
 }
@@ -57,7 +58,8 @@ async function startServer() {
 
   const PORT = Number(process.env.PORT) || 3000;
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (!isProductionRuntime()) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -65,10 +67,12 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    if (existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
   server.listen(PORT, '0.0.0.0', () => {
