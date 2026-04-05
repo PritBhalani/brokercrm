@@ -51,3 +51,15 @@ Prefer building the UI on Vercel. If you need a full install including devDepend
 **Vercel (frontend):** `VITE_API_BASE_URL` (or `VITE_API_URL` / `REACT_APP_API_URL`)
 
 Optional: `GEMINI_API_KEY` if your build uses it; `DEBUG_API_ERRORS` / `VERCEL_DEBUG` only for private debugging.
+
+## Troubleshooting: CORS (Vercel → API)
+
+**Symptom:** `No 'Access-Control-Allow-Origin' header` on `/api/users/login` (often on **OPTIONS** preflight).
+
+1. **Set `CORS_ORIGINS` on the API** to your exact Vercel origin(s), comma-separated, e.g.  
+   `https://brokercrm-jet.vercel.app`  
+   (HTTPS, no trailing slash.) Restart the API after changing env.
+
+2. **If the API is behind ngrok (free):** ngrok can intercept browser traffic before it reaches Express, so the response may have **no CORS headers** even when Express is configured correctly. Prefer **`VITE_API_BASE_URL`** pointing at your **Render** (or other stable) API URL for production. If you must use ngrok, try paid ngrok or tunnel settings that do not block API preflight.
+
+3. **Debug:** set `DEBUG_CORS=1` on the server and check logs for `[CORS] blocked origin:` to see mismatches.
