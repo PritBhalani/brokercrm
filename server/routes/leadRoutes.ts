@@ -20,6 +20,7 @@ import {
   getAgentTradeQueue,
   recordNoTradeToday,
   getCollectionLabels,
+  getDailyTradeOffers,
 } from '../controllers/leadController.ts';
 import { protect, authorize } from '../middleware/auth.ts';
 import { processCSV } from '../utils/csvUploader.ts';
@@ -34,6 +35,7 @@ router.get('/stats', protect, authorize('admin'), getDashboardStats);
 
 router.get('/agent/trade-queue', protect, authorize('agent'), getAgentTradeQueue);
 router.get('/collection-labels', protect, getCollectionLabels);
+router.get('/daily-trade-offers', protect, getDailyTradeOffers);
 
 // Static paths MUST come before /:id parameterized paths
 router.post('/bulk/transfer', protect, authorize('admin'), bulkTransferLeads);

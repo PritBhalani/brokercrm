@@ -24,20 +24,20 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center p-4 font-sans">
+    <div className="min-h-screen flex items-center justify-center p-4 font-sans bg-slate-950 text-app-text bg-[radial-gradient(ellipse_100%_60%_at_50%_-15%,rgba(37,99,235,0.14),transparent)]">
       <div className="max-w-md w-full">
         {/* Logo/Brand */}
         <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-sm shadow-black/30 rotate-3 hover:rotate-0 transition-transform duration-300">
+          <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-900/40 rotate-3 hover:rotate-0 transition-transform duration-300 ring-1 ring-blue-500/30">
             <Shield className="text-white" size={32} />
           </div>
-          <h1 className="text-3xl font-black text-app-text-active tracking-tight">BrokerCRM</h1>
+          <h1 className="text-3xl font-black text-app-text-active tracking-tight drop-shadow-sm">BrokerCRM</h1>
           <p className="text-app-text-muted mt-2 font-medium">Real Estate Lead Management</p>
         </div>
 
-        <div className="bg-app-surface rounded-3xl shadow-md shadow-black/20 p-8 border border-app-border relative overflow-hidden">
+        <div className="bg-app-surface rounded-3xl shadow-xl shadow-black/40 p-8 border border-app-border relative overflow-hidden">
           {/* Decorative element */}
-          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
+          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/15 rounded-full -mr-16 -mt-16 blur-2xl pointer-events-none" aria-hidden />
           
           <div className="relative z-10">
             <div className="flex items-center justify-between mb-8">

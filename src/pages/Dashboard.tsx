@@ -101,16 +101,20 @@ export const Dashboard: React.FC = () => {
   const [collectionLabelDraft, setCollectionLabelDraft] = useState<string[]>([]);
   const [newCollectionLabel, setNewCollectionLabel] = useState('');
   const [savingCollectionLabels, setSavingCollectionLabels] = useState(false);
+  const [dailyTradeSlotsDraft, setDailyTradeSlotsDraft] = useState<string[]>([]);
+  const [newDailyTradeSlot, setNewDailyTradeSlot] = useState('');
+  const [savingDailySlots, setSavingDailySlots] = useState(false);
   type SortKey = 'name' | 'activeClients' | 'clientsWithTrade' | 'totalBuyQuantity' | 'pendingPayment' | 'receivedPayment';
   const [sortKey, setSortKey] = useState<SortKey>('receivedPayment');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const fetchStats = async () => {
     try {
-      const [leadsRes, adminStatsRes, settingsRes] = await Promise.all([
+      const [leadsRes, adminStatsRes, settingsRes, dailyOffersRes] = await Promise.all([
         api.get('/leads/stats'),
         api.get('/admin/stats'),
         api.get('/admin/settings'),
+        api.get('/leads/daily-trade-offers'),
       ]);
       setStats(leadsRes.data);
       setAdminStats(adminStatsRes.data);
@@ -119,6 +123,8 @@ export const Dashboard: React.FC = () => {
       setCollectionLabelDraft(
         Array.isArray(raw) && raw.length > 0 ? raw : ['Prit', 'Abhay', 'Pradip']
       );
+      const slots = dailyOffersRes.data?.slots;
+      setDailyTradeSlotsDraft(Array.isArray(slots) ? slots : []);
     } catch (error) {
       console.error('Error fetching stats:', error);
     } finally {
@@ -166,6 +172,35 @@ export const Dashboard: React.FC = () => {
 
   const removeCollectionLabel = (index: number) => {
     setCollectionLabelDraft((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const addDailyTradeSlot = () => {
+    const t = newDailyTradeSlot.trim();
+    if (!t) return;
+    setDailyTradeSlotsDraft((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    setNewDailyTradeSlot('');
+  };
+
+  const removeDailyTradeSlot = (index: number) => {
+    setDailyTradeSlotsDraft((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const saveDailyTradeSlots = async () => {
+    try {
+      setSavingDailySlots(true);
+      const res = await api.put('/admin/daily-trade-offers', { slots: dailyTradeSlotsDraft });
+      setDailyTradeSlotsDraft(Array.isArray(res.data?.slots) ? res.data.slots : []);
+      addNotification({
+        title: 'Saved',
+        message: `Today's trade names updated for UTC date ${res.data?.dayKey ?? ''}. Agents must pick one when logging a buy.`,
+        type: 'success',
+      });
+    } catch (error) {
+      console.error('Error saving daily trade slots:', error);
+      addNotification({ title: 'Error', message: 'Could not save trade names.', type: 'error' });
+    } finally {
+      setSavingDailySlots(false);
+    }
   };
 
   const saveCollectionLabels = async () => {
@@ -425,6 +460,57 @@ export const Dashboard: React.FC = () => {
             >
               <Wallet size={18} />
               {savingCollectionLabels ? 'Saving…' : 'Save list'}
+            </Button>
+          </div>
+        </Card>
+      </section>
+
+      <section aria-label="Daily trade names">
+        <Card>
+          <CardHeader
+            title="Today's trade names (UTC day)"
+            description="Agents see these in a dropdown on “Add Daily Trade Log” for today only (UTC). Add Trade 1, Trade 2, etc., then save. Leave empty to allow logging without a named slot."
+          />
+          <div className="flex flex-wrap gap-2 mb-4">
+            {dailyTradeSlotsDraft.map((label, idx) => (
+              <span
+                key={`${label}-${idx}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-app-border bg-app-root px-3 py-1.5 text-sm font-semibold text-app-text-active"
+              >
+                {label}
+                <button
+                  type="button"
+                  onClick={() => removeDailyTradeSlot(idx)}
+                  className="rounded p-0.5 text-rose-400 hover:bg-rose-500/20"
+                  aria-label={`Remove ${label}`}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="flex-1 min-w-0">
+              <label className="block text-xs font-bold uppercase tracking-wider text-app-text-muted mb-1">
+                New trade name
+              </label>
+              <input
+                type="text"
+                value={newDailyTradeSlot}
+                onChange={(e) => setNewDailyTradeSlot(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addDailyTradeSlot())}
+                placeholder="e.g. Trade 1"
+                maxLength={80}
+                className="w-full px-4 py-2 bg-app-root border border-app-border rounded-xl text-app-text-active outline-none focus:border-blue-500/60"
+              />
+            </div>
+            <Button variant="secondary" type="button" onClick={addDailyTradeSlot} disabled={!newDailyTradeSlot.trim()}>
+              <Plus size={18} />
+              Add
+            </Button>
+            <Button variant="primary" type="button" onClick={() => void saveDailyTradeSlots()} disabled={savingDailySlots}>
+              <TrendingUp size={18} />
+              {savingDailySlots ? 'Saving…' : 'Save for today'}
             </Button>
           </div>
         </Card>

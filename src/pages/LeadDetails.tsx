@@ -44,6 +44,8 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
   const [tradeProfit, setTradeProfit] = useState('');
   const [tradeError, setTradeError] = useState('');
   const [tradeOpen, setTradeOpen] = useState(false);
+  const [dailyTradeSlots, setDailyTradeSlots] = useState<string[]>([]);
+  const [selectedTradeSlot, setSelectedTradeSlot] = useState('');
 
   const [addingPayment, setAddingPayment] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -103,6 +105,28 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
         setPaymentUPIHolder((prev) => (labels.includes(prev) ? prev : labels[0]));
       } catch {
         /* keep defaults */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get('/leads/daily-trade-offers');
+        const slots: string[] = Array.isArray(res.data?.slots) ? res.data.slots : [];
+        if (cancelled) return;
+        setDailyTradeSlots(slots);
+        setSelectedTradeSlot((prev) => {
+          if (slots.length === 0) return '';
+          if (prev && slots.includes(prev)) return prev;
+          return slots[0];
+        });
+      } catch {
+        if (!cancelled) setDailyTradeSlots([]);
       }
     })();
     return () => {
@@ -215,6 +239,10 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
        setTradeError('Capital and Buy Qty are required.');
        return;
     }
+    if (dailyTradeSlots.length > 0 && !selectedTradeSlot) {
+      setTradeError('Select today\'s trade from the dropdown.');
+      return;
+    }
     if (Number(tradeCapital) > 500000) {
       if (!window.confirm('Large capital amount detected (> ₹5,00,000). Confirm?')) return;
     }
@@ -224,7 +252,10 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
       const resp = await api.post(`/leads/${id}/trades`, {
         capital: tradeCapital,
         buyQuantity: tradeBuyQuantity,
-        profit: tradeProfit
+        profit: tradeProfit,
+        ...(dailyTradeSlots.length > 0 && selectedTradeSlot
+          ? { tradeSlotName: selectedTradeSlot }
+          : {}),
       });
       addNotification({
         title: 'Trade Recorded',
@@ -344,7 +375,7 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
           <div className="bg-app-surface p-6 rounded-xl border border-app-border shadow-sm shadow-black/5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-xl font-bold">
+                <div className="w-12 h-12 bg-blue-500/15 text-blue-400 border border-blue-500/25 rounded-xl flex items-center justify-center text-xl font-bold">
                   {lead.name.charAt(0)}
                 </div>
                 <div>
@@ -363,7 +394,7 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1">
-                <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-xl text-sm font-bold border border-blue-100">
+                <span className="px-4 py-2 bg-blue-500/10 text-blue-300 rounded-xl text-sm font-bold border border-blue-500/25">
                   {formatLeadStatus(lead.status)}
                 </span>
                 <span className="text-[10px] text-app-text-muted font-medium max-w-[14rem] text-right leading-tight">
@@ -569,12 +600,42 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
             </h3>
             {lead.trades?.length > 0 && (
               <p className="text-xs text-app-text-muted mb-4">
-                Last trade profit: ₹{lead.trades[lead.trades.length - 1]?.profit ?? 0} — use payment section below to log margin
+                Last trade
+                {lead.trades[lead.trades.length - 1]?.tradeSlotName
+                  ? ` (${lead.trades[lead.trades.length - 1].tradeSlotName})`
+                  : ''}
+                : profit ₹{lead.trades[lead.trades.length - 1]?.profit ?? 0} — use payment section below to log margin
                 / commission after the trade.
               </p>
             )}
             <form onSubmit={handleAddTrade} className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
+              {dailyTradeSlots.length > 0 ? (
+                <div>
+                  <label className="block text-xs font-bold text-app-text-muted uppercase tracking-wider mb-1">
+                    Today&apos;s trade (admin list)
+                  </label>
+                  <select
+                    required
+                    value={selectedTradeSlot}
+                    onChange={(e) => setSelectedTradeSlot(e.target.value)}
+                    className="w-full px-4 py-3 bg-app-root border border-app-border rounded-xl text-app-text-active focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+                  >
+                    {dailyTradeSlots.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-app-text-muted mt-1">
+                    Names apply to today (UTC) only. Quantity is entered below.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-app-text-muted rounded-xl border border-app-border/80 bg-app-root/80 px-3 py-2">
+                  No named trades for today (UTC) yet — admin can add Trade 1, Trade 2, etc. on the dashboard. You can still log capital, qty, and profit.
+                </p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-app-text mb-1">Capital (₹)</label>
                   <input type="number" required value={tradeCapital} onChange={e => setTradeCapital(e.target.value)} className="w-full px-4 py-2 bg-app-root border border-app-border rounded-xl focus:border-blue-500 focus:ring-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />

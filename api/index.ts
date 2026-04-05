@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import type { IncomingMessage, ServerResponse } from 'http';
 import serverless from 'serverless-http';
 import { createApp } from '../server/createApp.ts';
@@ -7,7 +8,10 @@ app.set('socketio', { to: () => ({ emit: () => {} }) });
 
 const handler = serverless(app);
 
-/** Vercel may forward paths like `/leads` instead of `/api/leads` to this function. */
+/**
+ * Vercel rewrites `/api/*` → this function; Express routes live under `/api/...`.
+ * If the runtime forwards a path without the `/api` prefix, restore it.
+ */
 export default function vercelHandler(
   req: IncomingMessage & { url?: string },
   res: ServerResponse

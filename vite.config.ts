@@ -9,6 +9,10 @@ export default defineConfig(({mode}) => {
   return {
     // Keep Vite's dep cache outside the repo so file watchers (tsx/nodemon) never see churn under node_modules/.vite
     cacheDir: path.join(os.tmpdir(), 'broker-crm-vite-cache'),
+    build: {
+      chunkSizeWarningLimit: 750,
+      sourcemap: false,
+    },
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),

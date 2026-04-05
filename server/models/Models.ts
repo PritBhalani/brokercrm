@@ -57,13 +57,24 @@ const leadSchema = new mongoose.Schema({
     capital: { type: Number, required: true },
     buyQuantity: { type: Number, required: true },
     profit: { type: Number, default: 0 },
-    date: { type: Date, default: Date.now }
+    date: { type: Date, default: Date.now },
+    /** Admin-defined slot name for this UTC day (e.g. Trade 1) when daily offers are configured */
+    tradeSlotName: { type: String },
   }],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 export const Lead = mongoose.model('Lead', leadSchema);
+
+/** Admin sets named trade slots per UTC calendar day; agents pick one when logging a buy. */
+const dailyTradeOfferSchema = new mongoose.Schema({
+  dayKey: { type: String, required: true, unique: true },
+  slots: { type: [String], default: [] },
+  updatedAt: { type: Date, default: Date.now },
+});
+
+export const DailyTradeOffer = mongoose.model('DailyTradeOffer', dailyTradeOfferSchema);
 
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

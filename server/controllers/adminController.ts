@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { SystemSettings, Attendance, User, Lead, Payment } from '../models/Models.ts';
+import { SystemSettings, Attendance, User, Lead, Payment, DailyTradeOffer } from '../models/Models.ts';
 import mongoose from 'mongoose';
 
 const DEFAULT_COLLECTION_LABELS = ['Prit', 'Abhay', 'Pradip'];
@@ -11,6 +11,26 @@ function parseCollectionLabels(body: unknown): { ok: true; labels: string[] } | 
   if (cleaned.some((s) => s.length > 80)) return { ok: false, message: 'Each label must be 80 characters or less' };
   return { ok: true, labels: cleaned };
 }
+
+/** Admin: set named trade slots for the current UTC calendar day (e.g. Trade 1, Trade 2). */
+export const setDailyTradeOffers = async (req: Request, res: Response) => {
+  try {
+    const { slots } = req.body as { slots?: unknown };
+    if (!Array.isArray(slots)) {
+      return res.status(400).json({ message: 'slots must be an array of strings' });
+    }
+    const cleaned = [...new Set(slots.map((s) => String(s).trim()).filter(Boolean))].slice(0, 25);
+    const dayKey = new Date().toISOString().split('T')[0];
+    const doc = await DailyTradeOffer.findOneAndUpdate(
+      { dayKey },
+      { $set: { slots: cleaned, updatedAt: new Date() } },
+      { upsert: true, new: true }
+    );
+    res.json({ dayKey, slots: doc.slots });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
 
 // Settings
 export const getSettings = async (req: Request, res: Response) => {

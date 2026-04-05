@@ -1,17 +1,23 @@
+import 'dotenv/config';
 import http from 'http';
 import { Server } from 'socket.io';
 import path from 'path';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import dotenv from 'dotenv';
 import { createApp } from './server/createApp.ts';
 import { connectDb } from './server/dbConnect.ts';
 import { initCronJobs } from './server/utils/cronJobs.ts';
 
-dotenv.config();
-
 async function startServer() {
-  await connectDb();
+  try {
+    await connectDb();
+    console.log('MongoDB connected');
+  } catch (err) {
+    console.warn(
+      '[MongoDB] Startup connection failed. Set MONGODB_URI in .env (e.g. Atlas) or start MongoDB on localhost:27017. API routes will return errors until the database is reachable.'
+    );
+    console.warn(err instanceof Error ? err.message : err);
+  }
 
   const app = createApp();
   const server = http.createServer(app);

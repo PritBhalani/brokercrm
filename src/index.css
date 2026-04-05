@@ -15,8 +15,15 @@
 }
 
 @layer base {
+  html {
+    color-scheme: dark;
+  }
   body {
+    min-height: 100%;
     background-color: var(--color-app-root);
     color: var(--color-app-text);
+  }
+  #root {
+    min-height: 100vh;
   }
 }

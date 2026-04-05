@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Lead, User, Payment, SystemSettings } from '../models/Models.ts';
+import { Lead, User, Payment, SystemSettings, DailyTradeOffer } from '../models/Models.ts';
 
 const DEFAULT_COLLECTION_LABELS = ['Prit', 'Abhay', 'Pradip'];
 
@@ -10,6 +10,17 @@ export const getCollectionLabels = async (req: any, res: Response) => {
     const labels =
       settings?.collectionAccountLabels?.length ? settings.collectionAccountLabels : DEFAULT_COLLECTION_LABELS;
     res.json({ labels });
+  } catch (e) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+/** Today's admin-defined trade slot names (UTC calendar day). */
+export const getDailyTradeOffers = async (req: any, res: Response) => {
+  try {
+    const dayKey = new Date().toISOString().split('T')[0];
+    const doc = await DailyTradeOffer.findOne({ dayKey }).lean();
+    res.json({ dayKey, slots: doc?.slots ?? [] });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -398,7 +409,7 @@ export const addPayment = async (req: any, res: Response) => {
 };
 
 export const addTrade = async (req: any, res: Response) => {
-  const { capital, buyQuantity, profit } = req.body;
+  const { capital, buyQuantity, profit, tradeSlotName } = req.body;
   
   // Configuration: Threshold limits to reject extremely large inputs
   const MAX_BUY_QUANTITY = 500000;
@@ -424,17 +435,35 @@ export const addTrade = async (req: any, res: Response) => {
       }
     }
 
+    const dayKey = new Date().toISOString().split('T')[0];
+    const offer = await DailyTradeOffer.findOne({ dayKey }).lean();
+    const slotTrimmed =
+      tradeSlotName != null && String(tradeSlotName).trim() !== '' ? String(tradeSlotName).trim() : '';
+
+    if (offer?.slots?.length) {
+      if (!slotTrimmed) {
+        return res.status(400).json({
+          message: 'Select today\'s trade from the list (admin sets names on the dashboard for this UTC day).',
+        });
+      }
+      if (!offer.slots.includes(slotTrimmed)) {
+        return res.status(400).json({ message: 'That trade is not in today\'s list. Refresh the page and try again.' });
+      }
+    }
+
     const newTrade: any = {
       capital: Number(capital) || 0,
       buyQuantity: numBuyQuantity,
       profit: Number(profit) || 0,
-      date: new Date()
+      date: new Date(),
     };
-    
+    if (slotTrimmed) newTrade.tradeSlotName = slotTrimmed;
+
     lead.trades.push(newTrade);
 
+    const slotPart = slotTrimmed ? ` [${slotTrimmed}]` : '';
     lead.activityLog.push({
-      action: `Added Trade - Cap: ₹${capital}, Qty: ${buyQuantity}, Profit: ₹${profit}`,
+      action: `Added Trade${slotPart} - Cap: ₹${capital}, Qty: ${buyQuantity}, Profit: ₹${profit}`,
       performedBy: req.user._id,
       timestamp: new Date()
     });
