@@ -1,14 +1,13 @@
 import { Request, Response } from 'express';
-import { Lead, User, Payment, SystemSettings, DailyTradeOffer } from '../models/Models.ts';
-
-const DEFAULT_COLLECTION_LABELS = ['Prit', 'Abhay', 'Pradip'];
+import { Lead, User, Payment, getSingletonSystemSettings, DailyTradeOffer } from '../models/Models.ts';
 
 /** Preset UPI / collection account names (same source as admin settings) — for payment form dropdown. */
 export const getCollectionLabels = async (req: any, res: Response) => {
   try {
-    const settings = await SystemSettings.findOne();
-    const labels =
-      settings?.collectionAccountLabels?.length ? settings.collectionAccountLabels : DEFAULT_COLLECTION_LABELS;
+    const settings = await getSingletonSystemSettings();
+    const labels = Array.isArray(settings?.collectionAccountLabels)
+      ? settings.collectionAccountLabels
+      : [];
     res.json({ labels });
   } catch (e) {
     res.status(500).json({ message: 'Server error' });
@@ -56,6 +55,14 @@ const getUTCDayBounds = (d: Date) => {
   return { start, end };
 };
 
+/** Next calendar day at 00:00:00 UTC (same as Fresh Trader scheduling). */
+const utcStartOfTomorrow = (): Date => {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date(`${todayStr}T00:00:00Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  return tomorrow;
+};
+
 const getAssignedAgentId = (lead: any): string | null => {
   if (!lead?.assignedAgent) return null;
   return typeof lead.assignedAgent === 'object'
@@ -86,6 +93,7 @@ export const getLeads = async (req: any, res: Response) => {
   // Admin can filter by assigned agent. For backwards compatibility we accept `agentId` too.
   const assignedAgent = req.query.assignedAgent as string;
   const agentId = req.query.agentId as string;
+  const activeOnly = req.query.activeOnly === 'true' || req.query.activeOnly === '1';
 
   try {
     let queryObj: any = {};
@@ -100,6 +108,18 @@ export const getLeads = async (req: any, res: Response) => {
           queryObj.assignedAgent = null;
         } else {
           queryObj.assignedAgent = filterValue;
+        }
+      }
+    }
+
+    if (activeOnly) {
+      queryObj.isActiveClient = true;
+      if (req.user.role === 'admin') {
+        const filterValue = assignedAgent || agentId;
+        if (!filterValue || filterValue === 'all' || filterValue === 'unassigned') {
+          return res
+            .status(400)
+            .json({ message: 'assignedAgent (or agentId) is required when activeOnly=true' });
         }
       }
     }
@@ -168,19 +188,38 @@ export const getLeadById = async (req: any, res: Response) => {
       return res.status(403).json({ message: 'Not authorized to view this lead' });
     }
 
-    res.json(lead);
+    const payments = await Payment.find({ leadId: lead._id }).sort({ date: -1 }).lean();
+    const payload = lead.toObject();
+    (payload as any).payments = payments;
+
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
 };
 
 export const updateLeadStatus = async (req: any, res: Response) => {
-  const { status, followUpDate, note } = req.body;
+  const { status, followUpDate, note, clientCapital } = req.body;
   try {
     const lead: any = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: 'Lead not found' });
 
     if (!assertCanMutateLead(req, lead, res)) return;
+
+    const wasReadyToWorkTomorrow = lead.status === 'ReadyToWorkTomorrow';
+    const previousClientCapital = lead.clientCapital;
+
+    if (clientCapital !== undefined) {
+      if (clientCapital === null || clientCapital === '') {
+        lead.clientCapital = null;
+      } else {
+        const n = Number(clientCapital);
+        if (Number.isNaN(n) || n < 0) {
+          return res.status(400).json({ message: 'Client capital must be a non-negative number.' });
+        }
+        lead.clientCapital = n;
+      }
+    }
 
     if (status) {
       // Enforce conversion workflow integrity.
@@ -210,40 +249,80 @@ export const updateLeadStatus = async (req: any, res: Response) => {
       lead.status = status;
       // Internal mapping
       const mapping: any = {
-        'New': 'new', 'Interested': 'interested', 'Callback': 'follow_up', 
-        'Converted': 'converted', 'ReadyToWorkTomorrow': 'interested'
+        New: 'new',
+        Interested: 'interested',
+        Callback: 'follow_up',
+        Converted: 'converted',
+        ReadyToWorkTomorrow: 'interested',
+        Ringing: 'contacted',
+        SwitchOff: 'follow_up',
+        NumberNotValid: 'not_interested',
       };
       lead.internalStatus = mapping[status] || 'new';
 
       // Auto-assign priority
       if (status === 'Converted' || status === 'ReadyToWorkTomorrow') lead.priority = 'high';
-      else if (status === 'Interested') lead.priority = 'medium';
+      else if (status === 'Interested' || status === 'Ringing') lead.priority = 'medium';
+      else if (status === 'SwitchOff' || status === 'NumberNotValid') lead.priority = 'low';
     }
     
     if (status === 'Ready to work tomorrow' || status === 'ReadyToWorkTomorrow') {
-      lead.nextFollowUpDate = new Date(Date.now() + 86400000); // Set to tomorrow
-      lead.isActiveClient = true;
+      const tomorrowUtc = utcStartOfTomorrow();
+      lead.nextFollowUpDate = tomorrowUtc;
+      lead.readyForDate = tomorrowUtc;
+      lead.isFreshTrader = true;
+      lead.isActiveClient = false;
     } else if (followUpDate) {
       lead.nextFollowUpDate = new Date(followUpDate);
-      
+
       // Upgrade priority if overdue
       const now = new Date();
       if (lead.nextFollowUpDate < now && lead.status !== 'Converted') {
         lead.priority = 'high';
       }
     }
-    
+
+    if (status && status !== 'ReadyToWorkTomorrow' && wasReadyToWorkTomorrow) {
+      lead.isFreshTrader = false;
+      lead.readyForDate = undefined;
+    }
+
     if (note) {
       if (!lead.notes) lead.notes = [];
       lead.notes.push({ text: note, createdAt: new Date() });
     }
 
     if (!lead.activityLog) lead.activityLog = [];
-    lead.activityLog.push({
-      action: `Status updated to ${status}`,
-      performedBy: req.user._id,
-      timestamp: new Date()
-    });
+
+    const capNorm = (v: unknown) => (v == null || v === '' ? null : Number(v));
+    const capChanged =
+      clientCapital !== undefined && capNorm(previousClientCapital) !== capNorm(lead.clientCapital);
+    if (capChanged) {
+      const v = lead.clientCapital;
+      lead.activityLog.push({
+        action:
+          v == null
+            ? 'Client capital (reference) cleared'
+            : `Client capital (reference) set to ₹${Number(v).toLocaleString('en-IN')}`,
+        performedBy: req.user._id,
+        timestamp: new Date(),
+      });
+    }
+
+    if (status) {
+      lead.activityLog.push({
+        action: `Status updated to ${status}`,
+        performedBy: req.user._id,
+        timestamp: new Date(),
+      });
+      if (status === 'ReadyToWorkTomorrow') {
+        lead.activityLog.push({
+          action: 'Scheduled as Fresh Trader (FT) for tomorrow (UTC)',
+          performedBy: req.user._id,
+          timestamp: new Date(),
+        });
+      }
+    }
 
     lead.updatedAt = new Date();
     await lead.save();
@@ -264,12 +343,11 @@ export const markAsFT = async (req: any, res: Response) => {
       return res.status(400).json({ message: 'Client is already active. Cannot be marked as FT.' });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(todayStr + 'T00:00:00Z');
-    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    const tomorrow = utcStartOfTomorrow();
 
     lead.isFreshTrader = true;
     lead.readyForDate = tomorrow;
+    lead.nextFollowUpDate = tomorrow;
     lead.updatedAt = new Date();
     lead.activityLog.push({
       action: 'Marked as Fresh Trader (FT) for tomorrow',
@@ -294,8 +372,45 @@ export const markAsFT = async (req: any, res: Response) => {
   }
 };
 
+/**
+ * Agent or admin: manually stop counting this client as "active" (and clear FT schedule).
+ * Use when the client stopped trading with you — Command Center / daily metrics will exclude them.
+ */
+export const setActiveClientInactive = async (req: any, res: Response) => {
+  try {
+    const lead: any = await Lead.findById(req.params.id);
+    if (!lead) return res.status(404).json({ message: 'Lead not found' });
+    if (!assertCanMutateLead(req, lead, res)) return;
+
+    if (!lead.isActiveClient && !lead.isFreshTrader) {
+      return res.status(400).json({
+        message: 'Client is not active and has no FT scheduled. Nothing to turn off.',
+      });
+    }
+
+    lead.isActiveClient = false;
+    lead.isFreshTrader = false;
+    lead.readyForDate = undefined;
+
+    if (!lead.activityLog) lead.activityLog = [];
+    lead.activityLog.push({
+      action: 'Marked inactive — no longer counted as active client / FT (stopped trading)',
+      performedBy: req.user._id,
+      timestamp: new Date(),
+    });
+    lead.updatedAt = new Date();
+    await lead.save();
+
+    res.json({ lead });
+  } catch (error) {
+    console.error('setActiveClientInactive error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 export const addPayment = async (req: any, res: Response) => {
   const {
+    tradeId: tradeIdBody,
     amount,
     status,
     accountUsed,
@@ -330,11 +445,22 @@ export const addPayment = async (req: any, res: Response) => {
       return res.status(400).json({ message: 'Cannot log payment: at least one trade must exist first.' });
     }
 
+    if (!tradeIdBody || String(tradeIdBody).trim() === '') {
+      return res.status(400).json({ message: 'Select which trade this payment is for.' });
+    }
+    const tradeSub = lead.trades.id(tradeIdBody);
+    if (!tradeSub) {
+      return res.status(400).json({
+        message: 'That trade is not on this lead. Refresh the page and pick a trade from the list.',
+      });
+    }
+
     const ec = expectedClearanceAt ? new Date(expectedClearanceAt) : undefined;
     const ed = expectedDate ? new Date(expectedDate) : ec ? ec : undefined;
 
     const newPayment = await Payment.create({
       leadId: lead._id,
+      tradeId: tradeSub._id,
       agentId: req.user._id,
       amount: numAmount,
       status: status || 'Pending',
@@ -351,23 +477,50 @@ export const addPayment = async (req: any, res: Response) => {
     });
 
     const acctBits = [accountUsed, collectionAccountLabel?.trim()].filter(Boolean).join(' · ');
+    const tradeBits = tradeSub.tradeSlotName ? ` · trade: ${tradeSub.tradeSlotName}` : '';
     lead.activityLog.push({
-      action: `Logged Payment - ₹${amount} (${status}) via ${acctBits}`,
+      action: `Logged Payment - ₹${amount} (${status})${tradeBits} via ${acctBits}`,
       performedBy: req.user._id,
       timestamp: new Date(),
     });
-    
-    lead.isActiveClient = true;
+
+    const payStatus = status || 'Pending';
+    if (payStatus === 'Received') {
+      lead.isActiveClient = true;
+      if (lead.status !== 'Converted' && hasAgentTrade(lead)) {
+        const paymentQuery: any = {
+          leadId: lead._id,
+          status: 'Received',
+        };
+        if (req.user.role === 'agent') {
+          paymentQuery.agentId = req.user._id;
+        }
+        const hasReceivedPayment = await Payment.exists(paymentQuery);
+        if (hasReceivedPayment) {
+          lead.convertedAt = new Date();
+          lead.status = 'Converted';
+          lead.internalStatus = 'converted';
+          lead.priority = 'high';
+          lead.activityLog.push({
+            action: 'Status set to Paid client (Converted) — payment received',
+            performedBy: req.user._id,
+            timestamp: new Date(),
+          });
+        }
+      }
+    }
     await lead.save();
 
     let warnings: string[] = [];
 
-    // Warning 1: No recent trades despite a payment being logged
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const hasRecentTrades = lead.trades?.some((t: any) => new Date(t.date) >= thirtyDaysAgo);
-    if (!hasRecentTrades) {
-       warnings.push('Payment received, but no recent trading activity found (last 30 days).');
+    // Warning 1: Received payment but no recent trades (only relevant when status is Received)
+    if (payStatus === 'Received') {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const hasRecentTrades = lead.trades?.some((t: any) => new Date(t.date) >= thirtyDaysAgo);
+      if (!hasRecentTrades) {
+        warnings.push('Payment received, but no recent trading activity found (last 30 days).');
+      }
     }
 
     // Warning 2: Agent's total pending exceeds total received → financial risk
@@ -451,8 +604,9 @@ export const addTrade = async (req: any, res: Response) => {
       }
     }
 
+    const capNum = Number(capital) || 0;
     const newTrade: any = {
-      capital: Number(capital) || 0,
+      capital: capNum,
       buyQuantity: numBuyQuantity,
       profit: Number(profit) || 0,
       date: new Date(),
@@ -462,13 +616,13 @@ export const addTrade = async (req: any, res: Response) => {
     lead.trades.push(newTrade);
 
     const slotPart = slotTrimmed ? ` [${slotTrimmed}]` : '';
+    const capPart = capNum > 0 ? `Cap: ₹${capNum}, ` : '';
     lead.activityLog.push({
-      action: `Added Trade${slotPart} - Cap: ₹${capital}, Qty: ${buyQuantity}, Profit: ₹${profit}`,
+      action: `Added Trade${slotPart} - ${capPart}Qty: ${buyQuantity}, Profit: ₹${profit}`,
       performedBy: req.user._id,
       timestamp: new Date()
     });
 
-    lead.isActiveClient = true; // Auto-activate if they have a trade
     await lead.save();
     
     let warnings: string[] = [];

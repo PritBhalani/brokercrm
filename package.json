@@ -17,10 +17,8 @@
     "start": "tsx server.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
-    "chart.js": "^4.5.1",
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
     "csv-parser": "^3.2.0",
@@ -30,12 +28,10 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.546.0",
     "mongoose": "^9.3.2",
-    "motion": "^12.23.24",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "papaparse": "^5.5.3",
     "react": "^19.0.0",
-    "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.13.2",
     "serverless-http": "^4.0.0",

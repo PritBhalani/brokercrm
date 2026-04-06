@@ -8,9 +8,12 @@ export function utcDayBounds(d = new Date()) {
 const PRIORITY_ORDER: Record<string, number> = {
   Callback: 0,
   Interested: 1,
-  New: 2,
-  ReadyToWorkTomorrow: 3,
-  Converted: 4,
+  Ringing: 2,
+  New: 3,
+  ReadyToWorkTomorrow: 4,
+  Converted: 5,
+  SwitchOff: 10,
+  NumberNotValid: 11,
 };
 
 export function sortLeadsForQueue(leads: any[]) {

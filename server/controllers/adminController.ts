@@ -1,13 +1,10 @@
 import { Request, Response } from 'express';
-import { SystemSettings, Attendance, User, Lead, Payment, DailyTradeOffer } from '../models/Models.ts';
+import { SystemSettings, getSingletonSystemSettings, Attendance, User, Lead, Payment, DailyTradeOffer } from '../models/Models.ts';
 import mongoose from 'mongoose';
-
-const DEFAULT_COLLECTION_LABELS = ['Prit', 'Abhay', 'Pradip'];
 
 function parseCollectionLabels(body: unknown): { ok: true; labels: string[] } | { ok: false; message: string } {
   if (!Array.isArray(body)) return { ok: false, message: 'collectionAccountLabels must be an array' };
   const cleaned = [...new Set(body.map((x) => String(x).trim()).filter(Boolean))].slice(0, 50);
-  if (cleaned.length === 0) return { ok: false, message: 'At least one collection account label is required' };
   if (cleaned.some((s) => s.length > 80)) return { ok: false, message: 'Each label must be 80 characters or less' };
   return { ok: true, labels: cleaned };
 }
@@ -35,18 +32,14 @@ export const setDailyTradeOffers = async (req: Request, res: Response) => {
 // Settings
 export const getSettings = async (req: Request, res: Response) => {
   try {
-    let settings = await SystemSettings.findOne();
+    let settings = await getSingletonSystemSettings();
     if (!settings) {
       settings = await SystemSettings.create({
         isLocked: false,
         officeStartTime: '09:00',
         officeEndTime: '18:00',
-        collectionAccountLabels: DEFAULT_COLLECTION_LABELS,
+        collectionAccountLabels: [],
       });
-    } else if (!settings.collectionAccountLabels?.length) {
-      settings.collectionAccountLabels = DEFAULT_COLLECTION_LABELS;
-      settings.updatedAt = new Date();
-      await settings.save();
     }
     res.json(settings);
   } catch (err) {
@@ -57,9 +50,9 @@ export const getSettings = async (req: Request, res: Response) => {
 export const updateSettings = async (req: Request, res: Response) => {
   try {
     const { isLocked, officeStartTime, officeEndTime, collectionAccountLabels } = req.body;
-    let settings = await SystemSettings.findOne();
+    let settings = await getSingletonSystemSettings();
     if (!settings) {
-      let initialLabels = DEFAULT_COLLECTION_LABELS;
+      let initialLabels: string[] = [];
       if (collectionAccountLabels !== undefined) {
         const parsed = parseCollectionLabels(collectionAccountLabels);
         if (parsed.ok === false) return res.status(400).json({ message: parsed.message });
@@ -71,19 +64,28 @@ export const updateSettings = async (req: Request, res: Response) => {
         officeEndTime: officeEndTime ?? '18:00',
         collectionAccountLabels: initialLabels,
       });
-    } else {
-      if (isLocked !== undefined) settings.isLocked = isLocked;
-      if (officeStartTime !== undefined) settings.officeStartTime = officeStartTime;
-      if (officeEndTime !== undefined) settings.officeEndTime = officeEndTime;
-      if (collectionAccountLabels !== undefined) {
-        const parsed = parseCollectionLabels(collectionAccountLabels);
-        if (parsed.ok === false) return res.status(400).json({ message: parsed.message });
-        settings.collectionAccountLabels = parsed.labels;
-      }
-      settings.updatedAt = new Date();
-      await settings.save();
+      return res.json(settings);
     }
-    res.json(settings);
+
+    const $set: Record<string, unknown> = { updatedAt: new Date() };
+    if (isLocked !== undefined) $set.isLocked = isLocked;
+    if (officeStartTime !== undefined) $set.officeStartTime = officeStartTime;
+    if (officeEndTime !== undefined) $set.officeEndTime = officeEndTime;
+    if (collectionAccountLabels !== undefined) {
+      const parsed = parseCollectionLabels(collectionAccountLabels);
+      if (parsed.ok === false) return res.status(400).json({ message: parsed.message });
+      $set.collectionAccountLabels = parsed.labels;
+    }
+
+    const updated = await SystemSettings.findByIdAndUpdate(
+      settings._id,
+      { $set },
+      { new: true, runValidators: true }
+    );
+    if (!updated) {
+      return res.status(500).json({ message: 'Server error' });
+    }
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }
@@ -106,124 +108,284 @@ export const getAttendance = async (req: Request, res: Response) => {
   }
 };
 
+/** UTC calendar bounds (aligned with daily trade offers / server UTC). */
+function utcDayRange(now = new Date()): { start: Date; end: Date } {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  return {
+    start: new Date(Date.UTC(y, m, d, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(y, m, d, 23, 59, 59, 999)),
+  };
+}
+
+function utcMonthRange(now = new Date()): { start: Date; end: Date } {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  return {
+    start: new Date(Date.UTC(y, m, 1, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999)),
+  };
+}
+
+function parseStatsPeriod(req: Request): {
+  period: 'all' | 'day' | 'month';
+  rangeStart: Date | null;
+  rangeEnd: Date | null;
+  periodLabel: string;
+} {
+  const raw = String(req.query.period ?? 'all').toLowerCase();
+  if (raw === 'day') {
+    const { start, end } = utcDayRange();
+    const key = new Date().toISOString().split('T')[0];
+    return { period: 'day', rangeStart: start, rangeEnd: end, periodLabel: `Today (${key} UTC)` };
+  }
+  if (raw === 'month') {
+    const { start, end } = utcMonthRange();
+    const label = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return { period: 'month', rangeStart: start, rangeEnd: end, periodLabel: `${label} (UTC)` };
+  }
+  return { period: 'all', rangeStart: null, rangeEnd: null, periodLabel: 'All time' };
+}
+
+const agentStatsPipelineAllTime = [
+  { $match: { role: 'agent' } },
+  {
+    $lookup: {
+      from: 'leads',
+      localField: '_id',
+      foreignField: 'assignedAgent',
+      as: 'leads',
+    },
+  },
+  {
+    $lookup: {
+      from: 'payments',
+      localField: '_id',
+      foreignField: 'agentId',
+      as: 'payments',
+    },
+  },
+  {
+    $project: {
+      agent: { _id: '$_id', name: '$name' },
+      activeClients: {
+        $size: {
+          $filter: {
+            input: '$leads',
+            as: 'lead',
+            cond: { $eq: ['$$lead.isActiveClient', true] },
+          },
+        },
+      },
+      clientsWithTrade: {
+        $size: {
+          $filter: {
+            input: '$leads',
+            as: 'lead',
+            cond: { $gt: [{ $size: { $ifNull: ['$$lead.trades', []] } }, 0] },
+          },
+        },
+      },
+      allTrades: {
+        $reduce: {
+          input: '$leads.trades',
+          initialValue: [],
+          in: { $concatArrays: ['$$value', { $ifNull: ['$$this', []] }] },
+        },
+      },
+    },
+  },
+  {
+    $project: {
+      _id: 0,
+      agent: 1,
+      activeClients: 1,
+      clientsWithTrade: 1,
+      totalBuyQuantity: { $sum: '$allTrades.buyQuantity' },
+      pendingPayment: {
+        $sum: {
+          $map: {
+            input: {
+              $filter: {
+                input: '$payments',
+                as: 'payment',
+                cond: { $eq: ['$$payment.status', 'Pending'] },
+              },
+            },
+            as: 'p',
+            in: { $ifNull: ['$$p.amount', 0] },
+          },
+        },
+      },
+      receivedPayment: {
+        $sum: {
+          $map: {
+            input: {
+              $filter: {
+                input: '$payments',
+                as: 'payment',
+                cond: { $eq: ['$$payment.status', 'Received'] },
+              },
+            },
+            as: 'p',
+            in: { $ifNull: ['$$p.amount', 0] },
+          },
+        },
+      },
+    },
+  },
+];
+
+function agentStatsPipelineForRange(rangeStart: Date, rangeEnd: Date) {
+  return [
+    { $match: { role: 'agent' } },
+    {
+      $lookup: {
+        from: 'leads',
+        localField: '_id',
+        foreignField: 'assignedAgent',
+        as: 'leads',
+      },
+    },
+    {
+      $lookup: {
+        from: 'payments',
+        let: { agentId: '$_id' },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$agentId', '$$agentId'] } } },
+          { $match: { date: { $gte: rangeStart, $lte: rangeEnd } } },
+        ],
+        as: 'payments',
+      },
+    },
+    {
+      $project: {
+        agent: { _id: '$_id', name: '$name' },
+        activeClients: {
+          $size: {
+            $filter: {
+              input: '$leads',
+              as: 'lead',
+              cond: { $eq: ['$$lead.isActiveClient', true] },
+            },
+          },
+        },
+        clientsWithTrade: {
+          $size: {
+            $filter: {
+              input: '$leads',
+              as: 'lead',
+              cond: {
+                $gt: [
+                  {
+                    $size: {
+                      $filter: {
+                        input: { $ifNull: ['$$lead.trades', []] },
+                        as: 't',
+                        cond: {
+                          $and: [{ $gte: ['$$t.date', rangeStart] }, { $lte: ['$$t.date', rangeEnd] }],
+                        },
+                      },
+                    },
+                  },
+                  0,
+                ],
+              },
+            },
+          },
+        },
+        allTrades: {
+          $reduce: {
+            input: '$leads',
+            initialValue: [],
+            in: {
+              $concatArrays: [
+                '$$value',
+                {
+                  $filter: {
+                    input: { $ifNull: ['$$this.trades', []] },
+                    as: 't',
+                    cond: {
+                      $and: [{ $gte: ['$$t.date', rangeStart] }, { $lte: ['$$t.date', rangeEnd] }],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        agent: 1,
+        activeClients: 1,
+        clientsWithTrade: 1,
+        totalBuyQuantity: { $sum: '$allTrades.buyQuantity' },
+        pendingPayment: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: '$payments',
+                  as: 'payment',
+                  cond: { $eq: ['$$payment.status', 'Pending'] },
+                },
+              },
+              as: 'p',
+              in: { $ifNull: ['$$p.amount', 0] },
+            },
+          },
+        },
+        receivedPayment: {
+          $sum: {
+            $map: {
+              input: {
+                $filter: {
+                  input: '$payments',
+                  as: 'payment',
+                  cond: { $eq: ['$$payment.status', 'Received'] },
+                },
+              },
+              as: 'p',
+              in: { $ifNull: ['$$p.amount', 0] },
+            },
+          },
+        },
+      },
+    },
+  ];
+}
+
 // Dashboard Stats
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
-    const agentsStats = await User.aggregate([
-      { $match: { role: 'agent' } },
-      {
-        $lookup: {
-          from: 'leads',
-          localField: '_id',
-          foreignField: 'assignedAgent',
-          as: 'leads'
-        }
-      },
-      {
-        $lookup: {
-          from: 'payments',
-          localField: '_id',
-          foreignField: 'agentId',
-          as: 'payments'
-        }
-      },
-      {
-        $project: {
-          agent: { _id: '$_id', name: '$name' },
-          activeClients: {
-            $size: {
-              $filter: {
-                input: '$leads',
-                as: 'lead',
-                cond: { $eq: ['$$lead.isActiveClient', true] }
-              }
-            }
-          },
-          clientsWithTrade: {
-            $size: {
-              $filter: {
-                input: '$leads',
-                as: 'lead',
-                cond: { $gt: [{ $size: { $ifNull: ['$$lead.trades', []] } }, 0] }
-              }
-            }
-          },
-          allTrades: {
-            $reduce: {
-              input: '$leads.trades',
-              initialValue: [],
-              in: { $concatArrays: ['$$value', { $ifNull: ['$$this', []] }] }
-            }
-          }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          agent: 1,
-          activeClients: 1,
-          clientsWithTrade: 1,
-          totalBuyQuantity: {
-            $sum: '$allTrades.buyQuantity'
-          },
-          pendingPayment: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$payments',
-                    as: 'payment',
-                    cond: { $eq: ['$$payment.status', 'Pending'] }
-                  }
-                },
-                as: 'p',
-                in: { $ifNull: ['$$p.amount', 0] }
-              }
-            }
-          },
-          receivedPayment: {
-            $sum: {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$payments',
-                    as: 'payment',
-                    cond: { $eq: ['$$payment.status', 'Received'] }
-                  }
-                },
-                as: 'p',
-                in: { $ifNull: ['$$p.amount', 0] }
-              }
-            }
-          }
-        }
-      }
+    const { period, rangeStart, rangeEnd, periodLabel } = parseStatsPeriod(req);
+
+    const agentsStats =
+      period === 'all'
+        ? await User.aggregate(agentStatsPipelineAllTime)
+        : await User.aggregate(agentStatsPipelineForRange(rangeStart!, rangeEnd!));
+
+    const revenueMatch: Record<string, unknown> = { status: 'Received' };
+    if (rangeStart && rangeEnd) {
+      revenueMatch.date = { $gte: rangeStart, $lte: rangeEnd };
+    }
+
+    const revenueAgg = await Payment.aggregate([
+      { $match: revenueMatch },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
-
-    // Global Monthly Collection
-    const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
-
-    const monthlyCollectionAgg = await Payment.aggregate([
-      {
-        $match: {
-          status: 'Received',
-          date: { $gte: startOfMonth, $lte: endOfMonth }
-        }
-      },
-      {
-        $group: {
-          _id: null,
-          total: { $sum: '$amount' }
-        }
-      }
-    ]);
-
-    const totalMonthlyCollection = monthlyCollectionAgg.length > 0 ? monthlyCollectionAgg[0].total : 0;
+    const totalRevenueInPeriod = revenueAgg.length > 0 ? revenueAgg[0].total : 0;
 
     res.json({
       agentsStats,
-      totalMonthlyCollection
+      totalRevenueInPeriod,
+      totalMonthlyCollection: totalRevenueInPeriod,
+      period,
+      periodLabel,
     });
   } catch (err) {
     console.error(err);
@@ -263,10 +425,34 @@ export const getAgentFullSummary = async (req: Request, res: Response) => {
       }
     });
 
-    const payments = await Payment.find({
+    const paymentsRaw = await Payment.find({
       agentId,
       date: { $gte: startOfDay, $lte: endOfDay }
-    }).populate('leadId', 'name').lean();
+    }).lean();
+
+    const payLeadIds = [...new Set(paymentsRaw.map((p: any) => p.leadId).filter(Boolean))];
+    const payLeads =
+      payLeadIds.length > 0
+        ? await Lead.find({ _id: { $in: payLeadIds } })
+            .select('name')
+            .lean()
+        : [];
+    const payLeadById = new Map(payLeads.map((l: any) => [l._id.toString(), l]));
+
+    /** Manual join: `.populate` sets `leadId` to null when the lead doc is missing, which breaks name + link. */
+    const payments = paymentsRaw.map((p: any) => {
+      const lid = p.leadId;
+      const idStr = lid?.toString?.() ?? String(lid);
+      const doc = payLeadById.get(idStr);
+      return {
+        ...p,
+        leadId: doc
+          ? { _id: lid, name: doc.name ?? '' }
+          : lid
+            ? { _id: lid, name: null }
+            : null,
+      };
+    });
 
     const paymentsReceived = payments.filter((p: any) => p.status === 'Received');
     const paymentsPending = payments.filter((p: any) => p.status === 'Pending');
@@ -288,15 +474,58 @@ export const getAgentFullSummary = async (req: Request, res: Response) => {
 export const listPayments = async (req: Request, res: Response) => {
   try {
     const status = req.query.status as string | undefined;
+    const agentId = req.query.agentId as string | undefined;
     const filter: any = {};
     if (status === 'Pending' || status === 'Received') filter.status = status;
+    if (agentId && mongoose.Types.ObjectId.isValid(agentId)) {
+      filter.agentId = new mongoose.Types.ObjectId(agentId);
+    }
 
-    const payments = await Payment.find(filter)
-      .populate('leadId', 'name phone')
-      .populate('agentId', 'name email')
-      .sort({ updatedAt: -1 })
-      .limit(500)
-      .lean();
+    const paymentsRaw = await Payment.find(filter).sort({ updatedAt: -1 }).limit(500).lean();
+
+    const leadIds = [...new Set(paymentsRaw.map((p: any) => p.leadId).filter(Boolean))];
+    const agentIds = [...new Set(paymentsRaw.map((p: any) => p.agentId).filter(Boolean))];
+
+    const [leadDocs, agentDocs] = await Promise.all([
+      leadIds.length > 0
+        ? Lead.find({ _id: { $in: leadIds } })
+            .select('name phone')
+            .lean()
+        : [],
+      agentIds.length > 0
+        ? User.find({ _id: { $in: agentIds } })
+            .select('name email')
+            .lean()
+        : [],
+    ]);
+
+    const leadById = new Map<string, any>(
+      leadDocs.map((l: any) => [l._id.toString(), l] as [string, any])
+    );
+    const agentById = new Map<string, any>(
+      agentDocs.map((a: any) => [a._id.toString(), a] as [string, any])
+    );
+
+    /** Avoid `.populate` on `leadId`: missing Lead docs become `null` and hide name + link. */
+    const payments = paymentsRaw.map((p: any) => {
+      const lid = p.leadId;
+      const aid = p.agentId;
+      const ldoc = lid ? leadById.get(lid.toString()) : undefined;
+      const adoc = aid ? agentById.get(aid.toString()) : undefined;
+      return {
+        ...p,
+        leadId: ldoc
+          ? { _id: lid, name: ldoc.name ?? '', phone: ldoc.phone ?? '' }
+          : lid
+            ? { _id: lid, name: null, phone: null }
+            : null,
+        agentId: adoc
+          ? { _id: aid, name: adoc.name ?? '', email: adoc.email ?? '' }
+          : aid
+            ? { _id: aid, name: null, email: null }
+            : null,
+      };
+    });
 
     res.json({ payments });
   } catch (err) {

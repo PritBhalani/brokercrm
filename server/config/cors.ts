@@ -1,7 +1,5 @@
 import type { CorsOptions } from 'cors';
 
-const NGROK_HEADER = 'ngrok-skip-browser-warning';
-
 function normalizeOrigin(origin: string): string {
   return origin.replace(/\/$/, '');
 }
@@ -20,12 +18,7 @@ export function getExpressCorsOptions(): CorsOptions {
   const base: CorsOptions = {
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      NGROK_HEADER,
-      'X-Requested-With',
-    ],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     maxAge: 86_400,
     optionsSuccessStatus: 204,
   };

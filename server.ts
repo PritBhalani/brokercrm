@@ -38,7 +38,7 @@ async function startServer() {
       origin: getSocketIoCorsOrigin(),
       methods: ['GET', 'POST', 'OPTIONS'],
       credentials: true,
-      allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
     },
     transports: ['websocket', 'polling'],
     pingTimeout: 60_000,

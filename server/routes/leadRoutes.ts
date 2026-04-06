@@ -16,6 +16,7 @@ import {
   bulkDeleteLeads,
   assignUnassignedLeadsEqually,
   markAsFT,
+  setActiveClientInactive,
   addPayment,
   getAgentTradeQueue,
   recordNoTradeToday,
@@ -48,6 +49,7 @@ router.post('/:id/trade-skip', protect, recordNoTradeToday);
 router.get('/:id', protect, getLeadById);
 router.patch('/:id/status', protect, updateLeadStatus);
 router.patch('/:id/mark-ft', protect, markAsFT);
+router.patch('/:id/client-inactive', protect, setActiveClientInactive);
 router.post('/:id/trades', protect, addTrade);
 router.post('/:id/payments', protect, addPayment);
 router.patch('/:id/assign', protect, authorize('admin'), assignLead);

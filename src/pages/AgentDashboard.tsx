@@ -9,7 +9,17 @@ import api from '../services/api.ts';
 import { Card, CardHeader } from '../components/ui/Card.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { format } from 'date-fns';
-import { ArrowRight, Calendar, Phone, ListOrdered, ExternalLink, AlertCircle, TrendingUp, Users } from 'lucide-react';
+import {
+  ArrowRight,
+  Calendar,
+  Phone,
+  ListOrdered,
+  ExternalLink,
+  AlertCircle,
+  TrendingUp,
+  Users,
+  X,
+} from 'lucide-react';
 
 const STATUS_BADGE: Record<string, string> = {
   New: 'text-blue-400',
@@ -17,6 +27,9 @@ const STATUS_BADGE: Record<string, string> = {
   Callback: 'text-amber-400',
   Converted: 'text-violet-400',
   ReadyToWorkTomorrow: 'text-cyan-400',
+  Ringing: 'text-sky-400',
+  SwitchOff: 'text-slate-400',
+  NumberNotValid: 'text-rose-400',
 };
 
 export const AgentDashboard: React.FC = () => {
@@ -27,6 +40,7 @@ export const AgentDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [priorityModal, setPriorityModal] = useState<'overdue' | 'dueToday' | 'highPriority' | null>(null);
   const fetchWorkbench = useCallback(async () => {
     try {
       const res = await api.get('/leads', { params: { workbench: 'true', limit: 200 } });
@@ -46,6 +60,22 @@ export const AgentDashboard: React.FC = () => {
 
   const queue = useMemo(() => buildWorkQueue(leads), [leads]);
   const { overdue, dueToday, highPriority } = useMemo(() => categorizeLeads(leads), [leads]);
+
+  const priorityModalLeads = useMemo(() => {
+    if (!priorityModal) return [];
+    if (priorityModal === 'overdue') return overdue;
+    if (priorityModal === 'dueToday') return dueToday;
+    return highPriority;
+  }, [priorityModal, overdue, dueToday, highPriority]);
+
+  const priorityModalTitle =
+    priorityModal === 'overdue'
+      ? 'Overdue follow-ups'
+      : priorityModal === 'dueToday'
+        ? 'Due today (UTC)'
+        : priorityModal === 'highPriority'
+          ? 'High priority leads'
+          : '';
   const agentId = user?._id?.toString() ?? '';
   const overdueFollowUps = overdue.length;
 
@@ -58,6 +88,15 @@ export const AgentDashboard: React.FC = () => {
       setFocusId(String(queue[0]._id));
     }
   }, [queue, focusId]);
+
+  useEffect(() => {
+    if (!priorityModal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPriorityModal(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [priorityModal]);
 
   const focused = queue.find((l) => String(l._id) === focusId) ?? null;
   const focusIndex = focused ? queue.findIndex((l) => String(l._id) === focusId) : -1;
@@ -108,6 +147,76 @@ export const AgentDashboard: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-12">
+      {priorityModal ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="priority-modal-title"
+          onClick={() => setPriorityModal(null)}
+        >
+          <div
+            className="w-full max-w-lg max-h-[min(80vh,520px)] flex flex-col bg-app-surface border border-app-border rounded-2xl shadow-2xl shadow-black/50 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-app-border bg-app-root/80">
+              <div>
+                <h2 id="priority-modal-title" className="text-sm font-black text-app-text-active uppercase tracking-wider">
+                  {priorityModalTitle}
+                </h2>
+                <p className="text-xs text-app-text-muted mt-1">
+                  {priorityModal === 'overdue' && 'Follow-up date before today (UTC).'}
+                  {priorityModal === 'dueToday' && 'Follow-up scheduled for today (UTC).'}
+                  {priorityModal === 'highPriority' && 'Leads with priority set to high in CRM.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPriorityModal(null)}
+                className="p-2 rounded-lg text-app-text-muted hover:text-app-text-active hover:bg-app-surface-hover transition-colors"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3 min-h-[120px]">
+              {priorityModalLeads.length === 0 ? (
+                <p className="text-sm text-app-text-muted text-center py-10">No leads in this list.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {priorityModalLeads.map((l: any) => (
+                    <li key={l._id}>
+                      <Link
+                        to={`/leads/${l._id}`}
+                        onClick={() => setPriorityModal(null)}
+                        className="flex items-start justify-between gap-3 rounded-xl border border-app-border bg-app-root/80 px-4 py-3 hover:border-blue-500/40 hover:bg-app-surface-hover/60 transition-colors group"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-app-text-active text-sm block truncate">{l.name}</span>
+                          <span className="text-xs text-app-text-muted font-mono mt-0.5 block">{l.phone}</span>
+                          {l.nextFollowUpDate ? (
+                            <span className="text-[10px] text-amber-400/90 mt-1 inline-flex items-center gap-1">
+                              <Calendar size={10} />
+                              {format(new Date(l.nextFollowUpDate), 'MMM d, yyyy')}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={`text-[10px] font-black uppercase ${STATUS_BADGE[l.status] ?? 'text-app-text-muted'}`}>
+                            {formatLeadStatus(l.status)}
+                          </span>
+                          <ExternalLink size={14} className="text-app-text-muted group-hover:text-blue-400" aria-hidden />
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-app-text-muted">Today&apos;s work</p>
@@ -164,7 +273,7 @@ export const AgentDashboard: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <button
             type="button"
-            onClick={() => overdue[0] && setFocusId(String(overdue[0]._id))}
+            onClick={() => setPriorityModal('overdue')}
             className="text-left rounded-2xl border border-app-border bg-app-surface p-5 shadow-sm shadow-black/10 hover:border-rose-500/40 transition-colors"
           >
             <p className="text-xs font-bold uppercase tracking-wider text-app-text-muted">Overdue</p>
@@ -182,7 +291,7 @@ export const AgentDashboard: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={() => highPriority[0] && setFocusId(String(highPriority[0]._id))}
+            onClick={() => setPriorityModal('highPriority')}
             className="text-left rounded-2xl border border-app-border bg-app-surface p-5 shadow-sm shadow-black/10 hover:border-violet-500/40 transition-colors"
           >
             <p className="text-xs font-bold uppercase tracking-wider text-app-text-muted">High priority</p>

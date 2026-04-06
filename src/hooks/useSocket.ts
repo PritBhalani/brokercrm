@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useNotifications } from '../context/NotificationContext.tsx';
-import { getApiOrigin, isNgrokApiOrigin } from '../config/apiOrigin.ts';
+import { getApiOrigin } from '../config/apiOrigin.ts';
 
 export const useSocket = () => {
   const { user } = useAuth();
@@ -16,7 +16,6 @@ export const useSocket = () => {
       }
 
       const apiOrigin = getApiOrigin();
-      const isNgrok = isNgrokApiOrigin(apiOrigin);
       const socket = io(apiOrigin || undefined, {
         path: '/socket.io/',
         transports: ['websocket', 'polling'],
@@ -25,13 +24,6 @@ export const useSocket = () => {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 10000,
         timeout: 20000,
-        ...(isNgrok && {
-          transportOptions: {
-            polling: {
-              extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
-            },
-          },
-        }),
       });
       socket.emit('join', user._id);
 

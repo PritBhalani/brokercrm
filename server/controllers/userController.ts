@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { User, Lead, SystemSettings, Attendance } from '../models/Models.ts';
+import { User, SystemSettings, getSingletonSystemSettings, Attendance } from '../models/Models.ts';
 import { getJwtSecret } from '../config/secrets.ts';
 
 const generateToken = (id: string) => {
@@ -56,7 +56,7 @@ export const loginUser = async (req: Request, res: Response) => {
           return res.status(403).json({ message: 'Your account is deactivated.' });
         }
 
-        let settings = await SystemSettings.findOne();
+        let settings = await getSingletonSystemSettings();
         if (!settings) {
           settings = await SystemSettings.create({ isLocked: false, officeStartTime: '09:00', officeEndTime: '18:00' });
         }
@@ -163,6 +163,72 @@ export const createAgent = async (req: Request, res: Response) => {
   }
 };
 
+export const updateAgent = async (req: any, res: Response) => {
+  try {
+    const { name, email, password } = req.body as {
+      name?: unknown;
+      email?: unknown;
+      password?: unknown;
+    };
+
+    const hasName = name !== undefined;
+    const hasEmail = email !== undefined;
+    const hasPassword =
+      password !== undefined &&
+      typeof password === 'string' &&
+      password.length > 0;
+
+    if (!hasName && !hasEmail && !hasPassword) {
+      return res.status(400).json({
+        message: 'Provide name, email, and/or a new password to update.',
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user || user.role !== 'agent') {
+      return res.status(404).json({ message: 'Agent not found' });
+    }
+
+    if (hasName) {
+      if (typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ message: 'Name cannot be empty' });
+      }
+      user.name = name.trim();
+    }
+
+    if (hasEmail) {
+      if (typeof email !== 'string' || !email.trim()) {
+        return res.status(400).json({ message: 'Email cannot be empty' });
+      }
+      const emailTrim = email.trim().toLowerCase();
+      const existing = await User.findOne({
+        email: emailTrim,
+        _id: { $ne: user._id },
+      });
+      if (existing) {
+        return res.status(400).json({ message: 'Email is already in use' });
+      }
+      user.email = emailTrim;
+    }
+
+    if (hasPassword) {
+      const pwd = password as string;
+      if (pwd.length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters' });
+      }
+      const salt = await bcrypt.genSalt(10);
+      user.password = await bcrypt.hash(pwd, salt);
+    }
+
+    await user.save();
+    const updated = await User.findById(user._id).select('-password');
+    res.json(updated);
+  } catch (error) {
+    console.error('Update agent error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 export const toggleAgentStatus = async (req: any, res: Response) => {
   try {
     const user = await User.findById(req.params.id);
@@ -172,22 +238,6 @@ export const toggleAgentStatus = async (req: any, res: Response) => {
 
     user.isActive = !user.isActive;
     await user.save();
-
-    if (!user.isActive) {
-      await Lead.updateMany(
-        { assignedAgent: user._id },
-        { 
-          $set: { assignedAgent: null },
-          $push: { 
-            activityLog: {
-              action: `Agent ${user.name} deactivated, lead marked as unassigned`,
-              performedBy: req.user._id,
-              timestamp: new Date()
-            }
-          }
-        }
-      );
-    }
 
     res.json({ message: `Agent ${user.isActive ? 'activated' : 'deactivated'} successfully`, user });
   } catch (error) {

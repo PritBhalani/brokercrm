@@ -11,7 +11,7 @@ A production-ready full-stack CRM for stockbroker calling teams.
 - **Follow-up System**: Reminders for callback status.
 
 ## Tech Stack
-- **Frontend**: React, Vite, Tailwind CSS, Chart.js, Lucide React.
+- **Frontend**: React, Vite, Tailwind CSS, Lucide React.
 - **Backend**: Node.js, Express, MongoDB, Socket.io.
 - **Auth**: JWT with Role-Based Access Control.
 
@@ -31,6 +31,5 @@ A production-ready full-stack CRM for stockbroker calling teams.
    npm run dev
    ```
 
-## Default Credentials
-- **Admin**: `admin@example.com` / `password123`
-- **Agent**: `agent1@example.com` / `password123`
+## First admin (empty database)
+When there are no users yet, the first login can bootstrap a **Super Admin** account using the email configured in `server/controllers/userController.ts` (see the bootstrap check in `loginUser`). After that, create agents from the admin UI or directly in MongoDB.

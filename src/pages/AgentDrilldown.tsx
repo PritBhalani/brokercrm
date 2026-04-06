@@ -196,10 +196,30 @@ export const AgentDrilldown: React.FC = () => {
                     {[...data.payments.received, ...data.payments.pending].length === 0 ? <p className="text-[10px] text-slate-600 italic">No payments today.</p> : 
                       [...data.payments.received, ...data.payments.pending].map((p: any, idx: number) => {
                          const isReceived = p.status === 'Received';
+                         const lead = p.leadId;
+                         const leadNavId =
+                           lead && typeof lead === 'object' && lead !== null && '_id' in lead && lead._id != null
+                             ? String((lead as any)._id)
+                             : lead != null
+                               ? String((lead as any)._id ?? lead)
+                               : null;
+                         const leadName = (() => {
+                           if (!lead || typeof lead !== 'object') return 'Unknown lead';
+                           const n = (lead as any).name;
+                           if (n != null && String(n).trim() !== '') return String(n);
+                           if (leadNavId) return 'Lead removed';
+                           return 'Unknown lead';
+                         })();
                          return (
-                           <div key={idx} className={`p-3 border rounded-lg ${isReceived ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}>
+                           <div key={p._id ?? idx} className={`p-3 border rounded-lg ${isReceived ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-rose-500/5 border-rose-500/20'}`}>
                              <div className="flex justify-between items-start mb-1">
-                               <span className={`font-bold hover:underline cursor-pointer text-sm ${isReceived ? 'text-emerald-300' : 'text-rose-300'}`} onClick={() => navigate(`/leads/${p.leadId._id}`)}>{p.leadId.name}</span>
+                               <span
+                                 className={`font-bold text-sm ${leadNavId ? `hover:underline cursor-pointer ${isReceived ? 'text-emerald-300' : 'text-rose-300'}` : isReceived ? 'text-emerald-300' : 'text-rose-300'}`}
+                                 onClick={() => leadNavId && navigate(`/leads/${leadNavId}`)}
+                                 role={leadNavId ? 'button' : undefined}
+                               >
+                                 {leadName}
+                               </span>
                                <span className={`text-xs font-bold ${isReceived ? 'text-emerald-400' : 'text-rose-400'}`}>₹{p.amount} ({p.status})</span>
                              </div>
                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Via {p.accountUsed}</p>

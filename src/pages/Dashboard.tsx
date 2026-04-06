@@ -1,14 +1,12 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useNotifications } from '../context/NotificationContext.tsx';
 import {
   BarChart3,
-  PieChart,
   TrendingUp,
   Phone,
   IndianRupee,
-  Briefcase,
   Lock,
   Unlock,
   AlertTriangle,
@@ -20,26 +18,12 @@ import {
   Trash2,
   Wallet,
 } from 'lucide-react';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend,
-  ArcElement,
-} from 'chart.js';
-import { Bar, Pie } from 'react-chartjs-2';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import api from '../services/api.ts';
 import { Card, CardHeader } from '../components/ui/Card.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { CSVUploadModal } from '../components/CSVUploadModal.tsx';
-import { formatLeadStatus } from '../lib/leadStatusDisplay.ts';
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -54,9 +38,15 @@ type LeadStats = {
   overdueFollowUps?: number;
 };
 
+type StatsPeriod = 'all' | 'day' | 'month';
+
 type AdminStats = {
   agentsStats?: any[];
+  /** Company-wide received payments for the selected period (or all time). */
+  totalRevenueInPeriod?: number;
   totalMonthlyCollection?: number;
+  period?: StatsPeriod;
+  periodLabel?: string;
 };
 
 type Settings = {
@@ -65,6 +55,17 @@ type Settings = {
   officeEndTime?: string;
   collectionAccountLabels?: string[];
 };
+
+type CollectionAccountDraftItem = { id: string; label: string };
+
+function toCollectionDraftItems(raw: unknown): CollectionAccountDraftItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((x) => String(x).trim())
+    .filter(Boolean)
+    .slice(0, 50)
+    .map((label) => ({ id: crypto.randomUUID(), label }));
+}
 
 function KpiCard({
   title,
@@ -98,7 +99,11 @@ export const Dashboard: React.FC = () => {
   const [assigning, setAssigning] = useState(false);
   const [togglingLock, setTogglingLock] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
-  const [collectionLabelDraft, setCollectionLabelDraft] = useState<string[]>([]);
+  const [collectionLabelDraft, setCollectionLabelDraft] = useState<CollectionAccountDraftItem[]>([]);
+  /** When true, do not replace the UPI list from GET /admin/settings (avoids losing edits after refetch). */
+  const collectionLabelsDirtyRef = useRef(false);
+  /** Ignore stale GET /admin/settings that finish after a save (same race as refresh showing old UPI names). */
+  const lastSettingsUpdatedAtMsRef = useRef(0);
   const [newCollectionLabel, setNewCollectionLabel] = useState('');
   const [savingCollectionLabels, setSavingCollectionLabels] = useState(false);
   const [dailyTradeSlotsDraft, setDailyTradeSlotsDraft] = useState<string[]>([]);
@@ -107,22 +112,36 @@ export const Dashboard: React.FC = () => {
   type SortKey = 'name' | 'activeClients' | 'clientsWithTrade' | 'totalBuyQuantity' | 'pendingPayment' | 'receivedPayment';
   const [sortKey, setSortKey] = useState<SortKey>('receivedPayment');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [statsPeriod, setStatsPeriod] = useState<StatsPeriod>('all');
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const [leadsRes, adminStatsRes, settingsRes, dailyOffersRes] = await Promise.all([
         api.get('/leads/stats'),
-        api.get('/admin/stats'),
+        api.get('/admin/stats', { params: { period: statsPeriod } }),
         api.get('/admin/settings'),
         api.get('/leads/daily-trade-offers'),
       ]);
       setStats(leadsRes.data);
       setAdminStats(adminStatsRes.data);
       setSettings(settingsRes.data);
-      const raw = settingsRes.data?.collectionAccountLabels;
-      setCollectionLabelDraft(
-        Array.isArray(raw) && raw.length > 0 ? raw : ['Prit', 'Abhay', 'Pradip']
-      );
+      const settingsUpdatedMs = settingsRes.data?.updatedAt
+        ? new Date(settingsRes.data.updatedAt).getTime()
+        : 0;
+      const staleFetch =
+        lastSettingsUpdatedAtMsRef.current > 0 &&
+        settingsUpdatedMs > 0 &&
+        settingsUpdatedMs < lastSettingsUpdatedAtMsRef.current;
+      if (!collectionLabelsDirtyRef.current && !staleFetch) {
+        const raw = settingsRes.data?.collectionAccountLabels;
+        setCollectionLabelDraft(toCollectionDraftItems(raw));
+      }
+      if (!staleFetch && settingsUpdatedMs > 0) {
+        lastSettingsUpdatedAtMsRef.current = Math.max(
+          lastSettingsUpdatedAtMsRef.current,
+          settingsUpdatedMs
+        );
+      }
       const slots = dailyOffersRes.data?.slots;
       setDailyTradeSlotsDraft(Array.isArray(slots) ? slots : []);
     } catch (error) {
@@ -130,7 +149,7 @@ export const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statsPeriod]);
 
   useEffect(() => {
     if (user?.role === 'admin') {
@@ -138,7 +157,7 @@ export const Dashboard: React.FC = () => {
     } else {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, fetchStats]);
 
   const handleAssignUnassigned = async () => {
     if (!window.confirm('Assign all unassigned leads equally to available agents?')) return;
@@ -163,15 +182,57 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const persistCollectionLabels = async (
+    items: CollectionAccountDraftItem[],
+    options?: { notify?: boolean }
+  ) => {
+    const notify = options?.notify === true;
+    try {
+      setSavingCollectionLabels(true);
+      const res = await api.put('/admin/settings', {
+        collectionAccountLabels: items.map((x) => x.label),
+      });
+      setSettings(res.data);
+      const raw = res.data?.collectionAccountLabels;
+      setCollectionLabelDraft(toCollectionDraftItems(raw));
+      const savedAt = res.data?.updatedAt ? new Date(res.data.updatedAt).getTime() : Date.now();
+      lastSettingsUpdatedAtMsRef.current = savedAt;
+      collectionLabelsDirtyRef.current = false;
+      if (notify) {
+        addNotification({
+          title: 'Saved',
+          message: 'UPI / collection account options updated for payment logging.',
+          type: 'success',
+        });
+      }
+    } catch (error) {
+      console.error('Error saving collection labels:', error);
+      addNotification({ title: 'Error', message: 'Could not save collection accounts.', type: 'error' });
+    } finally {
+      setSavingCollectionLabels(false);
+    }
+  };
+
   const addCollectionLabel = () => {
     const t = newCollectionLabel.trim();
     if (!t) return;
-    setCollectionLabelDraft((prev) => (prev.includes(t) ? prev : [...prev, t]));
+    collectionLabelsDirtyRef.current = true;
+    setCollectionLabelDraft((prev) => {
+      if (prev.some((x) => x.label === t)) return prev;
+      const next = [...prev, { id: crypto.randomUUID(), label: t }];
+      void persistCollectionLabels(next);
+      return next;
+    });
     setNewCollectionLabel('');
   };
 
-  const removeCollectionLabel = (index: number) => {
-    setCollectionLabelDraft((prev) => prev.filter((_, i) => i !== index));
+  const removeCollectionLabel = (id: string) => {
+    collectionLabelsDirtyRef.current = true;
+    setCollectionLabelDraft((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      void persistCollectionLabels(next);
+      return next;
+    });
   };
 
   const addDailyTradeSlot = () => {
@@ -204,29 +265,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const saveCollectionLabels = async () => {
-    if (collectionLabelDraft.length === 0) {
-      addNotification({ title: 'Add at least one', message: 'Keep one collection account name.', type: 'warning' });
-      return;
-    }
-    try {
-      setSavingCollectionLabels(true);
-      const res = await api.put('/admin/settings', { collectionAccountLabels: collectionLabelDraft });
-      setSettings(res.data);
-      const raw = res.data?.collectionAccountLabels;
-      setCollectionLabelDraft(
-        Array.isArray(raw) && raw.length > 0 ? raw : ['Prit', 'Abhay', 'Pradip']
-      );
-      addNotification({
-        title: 'Saved',
-        message: 'UPI / collection account options updated for payment logging.',
-        type: 'success',
-      });
-    } catch (error) {
-      console.error('Error saving collection labels:', error);
-      addNotification({ title: 'Error', message: 'Could not save collection accounts.', type: 'error' });
-    } finally {
-      setSavingCollectionLabels(false);
-    }
+    await persistCollectionLabels(collectionLabelDraft, { notify: true });
   };
 
   const toggleOfficeHoursLock = async () => {
@@ -235,6 +274,8 @@ export const Dashboard: React.FC = () => {
       const newStatus = !settings?.isLocked;
       const res = await api.put('/admin/settings', { isLocked: newStatus });
       setSettings(res.data);
+      const u = res.data?.updatedAt ? new Date(res.data.updatedAt).getTime() : Date.now();
+      lastSettingsUpdatedAtMsRef.current = Math.max(lastSettingsUpdatedAtMsRef.current, u);
       addNotification({
         title: newStatus ? 'Login locked' : 'Login unlocked',
         message: newStatus ? 'Agents cannot log in.' : 'Agents can log in.',
@@ -324,29 +365,6 @@ export const Dashboard: React.FC = () => {
     return null;
   }
 
-  const statusData = {
-    labels: stats?.statusBreakdown?.map((s) => formatLeadStatus(s._id)) ?? [],
-    datasets: [
-      {
-        data: stats?.statusBreakdown?.map((s) => s.count) ?? [],
-        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-        borderWidth: 0,
-      },
-    ],
-  };
-
-  const agentData = {
-    labels: stats?.agentBreakdown?.map((a) => a.name) ?? [],
-    datasets: [
-      {
-        label: 'Leads per agent',
-        data: stats?.agentBreakdown?.map((a) => a.count) ?? [],
-        backgroundColor: '#3b82f6',
-        borderRadius: 8,
-      },
-    ],
-  };
-
   const alerts: { id: string; tone: 'warn' | 'danger'; text: string }[] = [];
   if ((stats?.overdueFollowUps ?? 0) > 0) {
     alerts.push({
@@ -413,22 +431,27 @@ export const Dashboard: React.FC = () => {
         <Card>
           <CardHeader
             title="UPI / collection accounts"
-            description="Names shown when agents log a payment with Account: UPI. Add, remove, then save. “Other” stays on the lead form for one-off entries."
+            description="Names shown when agents log a payment with Account: UPI. Add or remove to update the list (saved automatically). Leave empty to use only “Other” on the lead form."
           />
           <div className="flex flex-wrap gap-2 mb-4">
-            {collectionLabelDraft.map((label, idx) => (
+            {collectionLabelDraft.map((item) => (
               <span
-                key={`${label}-${idx}`}
+                key={item.id}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-app-border bg-app-root px-3 py-1.5 text-sm font-semibold text-app-text-active"
               >
-                {label}
+                {item.label}
                 <button
                   type="button"
-                  onClick={() => removeCollectionLabel(idx)}
-                  className="rounded p-0.5 text-rose-400 hover:bg-rose-500/20"
-                  aria-label={`Remove ${label}`}
+                  disabled={savingCollectionLabels}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeCollectionLabel(item.id);
+                  }}
+                  className="inline-flex shrink-0 items-center justify-center min-h-9 min-w-9 -m-1 rounded-md p-1.5 text-rose-400 hover:bg-rose-500/20 disabled:opacity-40 disabled:pointer-events-none"
+                  aria-label={`Remove ${item.label}`}
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={16} className="pointer-events-none" aria-hidden />
                 </button>
               </span>
             ))}
@@ -456,7 +479,7 @@ export const Dashboard: React.FC = () => {
               variant="primary"
               type="button"
               onClick={() => void saveCollectionLabels()}
-              disabled={savingCollectionLabels || collectionLabelDraft.length === 0}
+              disabled={savingCollectionLabels}
             >
               <Wallet size={18} />
               {savingCollectionLabels ? 'Saving…' : 'Save list'}
@@ -516,6 +539,37 @@ export const Dashboard: React.FC = () => {
         </Card>
       </section>
 
+      <section aria-label="Team performance period" className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-app-border bg-app-surface/60 px-4 py-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-app-text-muted">Team metrics period</p>
+          <p className="text-sm text-app-text-muted mt-0.5">
+            Pending, received, trades, and buy qty follow the selected range (UTC). Active = current pipeline snapshot.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-xl border border-app-border p-1 bg-app-root">
+            {(['all', 'month', 'day'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setStatsPeriod(p)}
+                className={cn(
+                  'px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors',
+                  statsPeriod === p
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-app-text-muted hover:text-app-text-active hover:bg-app-surface-hover/80'
+                )}
+              >
+                {p === 'all' ? 'All time' : p === 'month' ? 'Monthly' : 'Daily'}
+              </button>
+            ))}
+          </div>
+          {adminStats?.periodLabel ? (
+            <span className="text-xs font-medium text-emerald-400/90 tabular-nums">{adminStats.periodLabel}</span>
+          ) : null}
+        </div>
+      </section>
+
       <section aria-label="Key performance indicators">
         <CardHeader title="KPIs" description="Snapshot of pipeline health" className="mb-4" />
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -523,8 +577,14 @@ export const Dashboard: React.FC = () => {
           <KpiCard title="Status updates today" value={stats?.callsToday ?? 0} icon={Phone} accentClass="bg-cyan-600" />
           <KpiCard title="Conversions" value={stats?.convertedCount ?? 0} icon={TrendingUp} accentClass="bg-emerald-600" />
           <KpiCard
-            title="Revenue (month)"
-            value={`₹${(adminStats?.totalMonthlyCollection ?? 0).toLocaleString()}`}
+            title={
+              statsPeriod === 'day'
+                ? 'Revenue (UTC day)'
+                : statsPeriod === 'month'
+                  ? 'Revenue (UTC month)'
+                  : 'Revenue (all time)'
+            }
+            value={`₹${(adminStats?.totalRevenueInPeriod ?? adminStats?.totalMonthlyCollection ?? 0).toLocaleString()}`}
             icon={IndianRupee}
             accentClass="bg-violet-600"
           />
@@ -555,15 +615,21 @@ export const Dashboard: React.FC = () => {
         <Card>
           <CardHeader
             title="Revenue"
-            description="Received payments this calendar month (company-wide)"
+            description={
+              statsPeriod === 'all'
+                ? 'Received payments, company-wide (all time)'
+                : statsPeriod === 'month'
+                  ? 'Received payments this UTC calendar month (company-wide)'
+                  : 'Received payments today (UTC calendar day, company-wide)'
+            }
             action={
               <span className="text-lg font-black text-emerald-400 tabular-nums">
-                ₹{(adminStats?.totalMonthlyCollection ?? 0).toLocaleString()}
+                ₹{(adminStats?.totalRevenueInPeriod ?? adminStats?.totalMonthlyCollection ?? 0).toLocaleString()}
               </span>
             }
           />
           <p className="text-sm text-app-text-muted">
-            Per-agent received vs pending is in the performance table below. Use Command Center for intraday drill-downs.
+            Per-agent received vs pending in the table use the same period as above. Use Command Center for more drill-downs.
           </p>
         </Card>
       </section>
@@ -573,7 +639,7 @@ export const Dashboard: React.FC = () => {
           <div className="p-6 border-b border-app-border">
             <CardHeader
               title="Agent performance"
-              description="Sort columns — top tier (received) and watch list (low activity) highlighted from the same stats API."
+              description="Sort columns — top tier (received) and watch list (low activity) use the selected period (UTC for daily/monthly). Active = clients marked active now."
             />
           </div>
           <div className="overflow-x-auto">
@@ -663,21 +729,6 @@ export const Dashboard: React.FC = () => {
             {(adminStats?.agentsStats ?? []).length === 0 ? (
               <p className="p-6 text-center text-app-text-muted text-sm">No agent rows yet.</p>
             ) : null}
-          </div>
-        </Card>
-      </section>
-
-      <section aria-label="Distribution charts" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader title="Leads by status" description="Pipeline mix" action={<PieChart className="text-app-text-muted" size={20} />} />
-          <div className="h-64 flex items-center justify-center">
-            <Pie data={statusData} options={{ maintainAspectRatio: false }} />
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title="Leads per agent" description="Load balance" action={<Briefcase className="text-app-text-muted" size={20} />} />
-          <div className="h-64">
-            <Bar data={agentData} options={{ maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }} />
           </div>
         </Card>
       </section>

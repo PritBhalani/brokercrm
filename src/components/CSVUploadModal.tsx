@@ -25,6 +25,11 @@ const normalizeStatus = (s: string) => {
     converted: 'Converted',
     readytoworktomorrow: 'ReadyToWorkTomorrow',
     'ready tomorrow': 'ReadyToWorkTomorrow',
+    ringing: 'Ringing',
+    switchoff: 'SwitchOff',
+    'switch off': 'SwitchOff',
+    numbernotvalid: 'NumberNotValid',
+    'number not valid': 'NumberNotValid',
   };
   return map[x] || 'New';
 };
@@ -391,7 +396,8 @@ export const CSVUploadModal: React.FC<CSVUploadModalProps> = ({ onClose, onSucce
               <br />
               Optional: <span className="font-bold text-app-text">email, status, investmentInterest</span>
               <br />
-              Status values map to: New, Interested, Callback, Converted (paid client), ReadyToWorkTomorrow — unknown values default to New.
+              Status values map to: New, Interested, Callback, Ringing, Switch off, Number not valid, Converted (paid client),
+              ReadyToWorkTomorrow — unknown values default to New.
             </p>
           </div>
         </div>

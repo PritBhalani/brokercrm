@@ -12,9 +12,12 @@ import { formatLeadStatus } from '../lib/leadStatusDisplay.ts';
 const PRIORITY_ORDER: Record<string, number> = {
   Callback: 0,
   Interested: 1,
-  New: 2,
-  ReadyToWorkTomorrow: 3,
-  Converted: 4,
+  Ringing: 2,
+  New: 3,
+  ReadyToWorkTomorrow: 4,
+  Converted: 5,
+  SwitchOff: 10,
+  NumberNotValid: 11,
 };
 
 const sortLeads = (leads: any[]) =>
@@ -28,7 +31,7 @@ const sortLeads = (leads: any[]) =>
     return 0;
   });
 
-/** Agents: overdue follow-ups first, then priority sort (matches server emphasis on due work). */
+/** Agents: overdue follow-ups first in the list, then pipeline priority sort. */
 const sortLeadsAgent = (leads: any[]) => {
   const overdue = leads.filter((l) => isLeadFollowUpOverdue(l));
   const rest = leads.filter((l) => !isLeadFollowUpOverdue(l));
@@ -41,6 +44,9 @@ const STATUS_COLORS: Record<string, string> = {
   Callback: 'text-amber-400',
   Converted: 'text-purple-400',
   ReadyToWorkTomorrow: 'text-cyan-400',
+  Ringing: 'text-sky-400',
+  SwitchOff: 'text-slate-400',
+  NumberNotValid: 'text-rose-400',
 };
 
 export const Leads: React.FC = () => {
@@ -50,6 +56,8 @@ export const Leads: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  /** Admin: filter by assigned agent id, "unassigned", or "" for all */
+  const [agentFilter, setAgentFilter] = useState('');
   const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -67,6 +75,15 @@ export const Leads: React.FC = () => {
       if (search) params.search = search;
       // Admin list: request enough rows to match dashboard totals (API default is 50).
       if (user?.role === 'admin') params.limit = 2000;
+      if (user?.role === 'agent') {
+        // Full assigned list — same flag as agent dashboard; skips server "due-only" lock on GET /leads.
+        params.workbench = 'true';
+        params.limit = 200;
+      }
+      if (user?.role === 'admin') {
+        if (agentFilter === 'unassigned') params.assignedAgent = 'unassigned';
+        else if (agentFilter) params.assignedAgent = agentFilter;
+      }
       const res = await api.get('/leads', { params });
       const raw = Array.isArray(res.data) ? res.data : (res.data?.leads ?? []);
       const total = typeof res.data?.total === 'number' ? res.data.total : raw.length;
@@ -78,7 +95,7 @@ export const Leads: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, search, user?.role]);
+  }, [statusFilter, search, user?.role, agentFilter]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -192,10 +209,25 @@ export const Leads: React.FC = () => {
           <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-950/25 px-3 py-2 text-xs text-rose-100 mb-3">
             <AlertTriangle size={16} className="shrink-0 mt-0.5" />
             <span>
-              <strong>{overdueCount} overdue</strong> follow-up(s). While due work exists, the server only returns due/overdue
-              leads — clear these first.
+              <strong>{overdueCount} overdue</strong> follow-up(s) — listed first. You can see all assigned leads here; use
+              search or status to narrow down.
             </span>
           </div>
+        )}
+        {isAdmin && (
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            className="w-full mb-3 px-3 py-2 bg-app-surface border border-app-border rounded-lg outline-none text-app-text text-xs"
+          >
+            <option value="">All agents</option>
+            <option value="unassigned">Unassigned</option>
+            {agents.map((a) => (
+              <option key={a._id} value={a._id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
         )}
         {leads.map(lead => (
           <div
@@ -258,7 +290,8 @@ export const Leads: React.FC = () => {
             <div className="mb-3 flex items-start gap-2 rounded-lg border border-rose-500/35 bg-rose-950/25 px-3 py-2 text-[10px] text-rose-100 leading-snug">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
               <span>
-                <strong>{overdueCount} overdue</strong> — shown first. Server restricts the list to due work until cleared.
+                <strong>{overdueCount} overdue</strong> — shown first in the queue. Full list of your assigned leads; filter
+                with search or status.
               </span>
             </div>
           )}
@@ -334,9 +367,28 @@ export const Leads: React.FC = () => {
             <option value="New">New</option>
             <option value="Interested">Interested</option>
             <option value="Callback">Callback</option>
+            <option value="Ringing">Ringing</option>
+            <option value="SwitchOff">Switch off</option>
+            <option value="NumberNotValid">Number not valid</option>
             <option value="Converted">Paid client</option>
             <option value="ReadyToWorkTomorrow">Ready Tomorrow</option>
           </select>
+          {isAdmin && (
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="w-full mt-2 px-3 py-2 bg-app-root border border-app-border focus:border-blue-500/60 rounded-lg outline-none text-app-text text-xs"
+              aria-label="Filter by assigned agent"
+            >
+              <option value="">All agents</option>
+              <option value="unassigned">Unassigned</option>
+              {agents.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Lead List */}

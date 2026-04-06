@@ -13,7 +13,8 @@ import {
   CalendarDays,
   Activity,
   TrendingUp,
-  Wallet,
+  Clock,
+  CheckCircle2,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -114,12 +115,25 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 label={isSidebarOpen ? "Command Center" : ""} 
                 active={location.pathname === '/command-center'} 
               />
-              <SidebarItem
-                to="/payments"
-                icon={Wallet}
-                label={isSidebarOpen ? 'Payments' : ''}
-                active={location.pathname === '/payments'}
-              />
+              <div className="space-y-0.5 pt-1">
+                {isSidebarOpen && (
+                  <p className="px-4 pt-2 pb-1 text-[10px] font-black uppercase tracking-wider text-app-text-muted">
+                    Payments
+                  </p>
+                )}
+                <SidebarItem
+                  to="/payments/pending"
+                  icon={Clock}
+                  label={isSidebarOpen ? 'Pending' : ''}
+                  active={location.pathname === '/payments/pending'}
+                />
+                <SidebarItem
+                  to="/payments/received"
+                  icon={CheckCircle2}
+                  label={isSidebarOpen ? 'Received' : ''}
+                  active={location.pathname === '/payments/received'}
+                />
+              </div>
               <SidebarItem 
                 to="/agents" 
                 icon={Users} 
@@ -161,17 +175,19 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   ? "Today's trades"
                   : location.pathname === '/command-center'
                     ? 'Command Center'
-                    : location.pathname === '/payments'
-                      ? 'Payments'
-                      : location.pathname.startsWith('/leads')
-                        ? isAdmin
-                          ? 'Lead management'
-                          : 'Call queue'
-                        : location.pathname === '/agents'
-                          ? 'Agent management'
-                          : location.pathname === '/attendance'
-                            ? 'Agent attendance'
-                            : ''}
+                    : location.pathname === '/payments/pending'
+                      ? 'Pending payments'
+                      : location.pathname === '/payments/received'
+                        ? 'Received payments'
+                        : location.pathname.startsWith('/leads')
+                          ? isAdmin
+                            ? 'Lead management'
+                            : 'Call queue'
+                          : location.pathname === '/agents'
+                            ? 'Agent management'
+                            : location.pathname === '/attendance'
+                              ? 'Agent attendance'
+                              : ''}
             </h2>
           </div>
           <div className="flex items-center gap-4">

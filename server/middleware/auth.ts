@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
-import { User, SystemSettings } from '../models/Models.ts';
+import { User, getSingletonSystemSettings } from '../models/Models.ts';
 import { getJwtSecret } from '../config/secrets.ts';
 
 export interface AuthRequest extends Request {
@@ -26,7 +26,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     }
 
     if (user.role === 'agent') {
-      const settings = await SystemSettings.findOne();
+      const settings = await getSingletonSystemSettings();
       
       if (settings?.isLocked) {
         return res.status(403).json({ message: 'System is locked by the admin.' });

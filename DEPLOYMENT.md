@@ -60,6 +60,4 @@ Optional: `GEMINI_API_KEY` if your build uses it; `DEBUG_API_ERRORS` / `VERCEL_D
    `https://brokercrm-jet.vercel.app`  
    (HTTPS, no trailing slash.) Restart the API after changing env.
 
-2. **If the API is behind ngrok (free):** ngrok can intercept browser traffic before it reaches Express, so the response may have **no CORS headers** even when Express is configured correctly. Prefer **`VITE_API_BASE_URL`** pointing at your **Render** (or other stable) API URL for production. If you must use ngrok, try paid ngrok or tunnel settings that do not block API preflight.
-
-3. **Debug:** set `DEBUG_CORS=1` on the server and check logs for `[CORS] blocked origin:` to see mismatches.
+2. **Debug:** set `DEBUG_CORS=1` on the server and check logs for `[CORS] blocked origin:` to see mismatches.

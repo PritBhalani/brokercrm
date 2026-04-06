@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import api from '../services/api.ts';
-import { TrendingUp, Lock, ChevronDown, ChevronRight, ExternalLink, RefreshCw } from 'lucide-react';
+import { TrendingUp, Lock, ChevronDown, ChevronRight, ExternalLink, RefreshCw, X, Loader2 } from 'lucide-react';
 
 // ─── Inline Agent Ribbon ───────────────────────────────────────────────────────
 const AgentRibbon: React.FC<{ agentId: string }> = ({ agentId }) => {
@@ -87,7 +87,44 @@ export const CommandCenter: React.FC = () => {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterType>('ALL');
+  const [activeModalAgent, setActiveModalAgent] = useState<{ _id: string; name: string } | null>(null);
+  const [activeClients, setActiveClients] = useState<any[]>([]);
+  const [activeClientsLoading, setActiveClientsLoading] = useState(false);
   const navigate = useNavigate();
+
+  const closeActiveModal = useCallback(() => {
+    setActiveModalAgent(null);
+    setActiveClients([]);
+  }, []);
+
+  const openActiveClientsForAgent = useCallback(async (agent: { _id: string; name: string }) => {
+    setActiveModalAgent(agent);
+    setActiveClientsLoading(true);
+    setActiveClients([]);
+    try {
+      const r = await api.get('/leads', {
+        params: {
+          assignedAgent: agent._id,
+          activeOnly: 'true',
+          limit: 500,
+        },
+      });
+      setActiveClients(Array.isArray(r.data?.leads) ? r.data.leads : []);
+    } catch {
+      setActiveClients([]);
+    } finally {
+      setActiveClientsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeModalAgent) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeActiveModal();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeModalAgent, closeActiveModal]);
 
   const fetchReports = useCallback(async () => {
     try {
@@ -147,6 +184,68 @@ export const CommandCenter: React.FC = () => {
 
   return (
     <div className="-m-8 min-h-[calc(100vh-4rem)] bg-slate-950 text-slate-300 font-mono">
+      {activeModalAgent ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="active-clients-modal-title"
+          onClick={closeActiveModal}
+        >
+          <div
+            className="w-full max-w-lg max-h-[min(80vh,520px)] flex flex-col bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-800 bg-slate-950/80">
+              <div>
+                <h2 id="active-clients-modal-title" className="text-sm font-black text-white uppercase tracking-wider">
+                  Active clients
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  {activeModalAgent.name} — leads with <span className="text-slate-400">isActiveClient</span> (live data)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeActiveModal}
+                className="p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors"
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3 min-h-[120px]">
+              {activeClientsLoading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-slate-500 text-sm">
+                  <Loader2 className="animate-spin" size={18} />
+                  Loading…
+                </div>
+              ) : activeClients.length === 0 ? (
+                <p className="text-sm text-slate-500 text-center py-10">No active clients for this agent.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {activeClients.map((lead: any) => (
+                    <li key={lead._id}>
+                      <Link
+                        to={`/leads/${lead._id}`}
+                        onClick={closeActiveModal}
+                        className="flex items-start justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 hover:border-blue-500/40 hover:bg-slate-800/40 transition-colors group"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-bold text-white text-sm block truncate">{lead.name}</span>
+                          <span className="text-xs text-slate-500 font-mono mt-0.5 block">{lead.phone}</span>
+                        </div>
+                        <ExternalLink size={14} className="text-slate-600 group-hover:text-blue-400 shrink-0 mt-0.5" aria-hidden />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="max-w-[1500px] mx-auto p-8 space-y-6">
 
         {/* KPI Header */}
@@ -290,9 +389,19 @@ export const CommandCenter: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* Active */}
+                      {/* Active — click lists leads with isActiveClient (same source as column count) */}
                       <td className="p-3 border-r border-slate-800">
-                        <span className="text-base font-bold text-slate-300">{report.activeClientsMorning}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void openActiveClientsForAgent(report.agent);
+                          }}
+                          className="text-base font-bold text-slate-300 hover:text-blue-400 underline decoration-transparent hover:decoration-blue-400/80 underline-offset-2 transition-colors text-left w-full min-w-[2rem]"
+                          title="View active clients for this agent"
+                        >
+                          {report.activeClientsMorning}
+                        </button>
                       </td>
 
                       {/* Trading */}

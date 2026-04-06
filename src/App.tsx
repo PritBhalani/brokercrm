@@ -56,11 +56,23 @@ const AppContent = () => {
         } />
 
         {/* Admin: Command Center is the landing */}
-        <Route path="/payments" element={
-          <ProtectedRoute roles={['admin']}>
-            <Payments />
-          </ProtectedRoute>
-        } />
+        <Route path="/payments" element={<Navigate to="/payments/pending" replace />} />
+        <Route
+          path="/payments/pending"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <Payments view="pending" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/payments/received"
+          element={
+            <ProtectedRoute roles={['admin']}>
+              <Payments view="received" />
+            </ProtectedRoute>
+          }
+        />
 
         <Route path="/command-center" element={
           <ProtectedRoute roles={['admin']}>

@@ -17,7 +17,16 @@ const leadSchema = new mongoose.Schema({
   email: { type: String },
   status: { 
     type: String, 
-    enum: ['New', 'Interested', 'Callback', 'Converted', 'ReadyToWorkTomorrow'], 
+    enum: [
+      'New',
+      'Interested',
+      'Callback',
+      'Converted',
+      'ReadyToWorkTomorrow',
+      'Ringing',
+      'SwitchOff',
+      'NumberNotValid',
+    ],
     default: 'New' 
   },
   internalStatus: {
@@ -32,6 +41,8 @@ const leadSchema = new mongoose.Schema({
   },
   assignedAgent: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   investmentInterest: { type: String },
+  /** Reference capital (₹) for this client — updated from pipeline save; not the same as per-trade capital. */
+  clientCapital: { type: Number },
   nextFollowUpDate: { type: Date },
   notes: [{
     text: String,
@@ -93,11 +104,16 @@ const settingsSchema = new mongoose.Schema({
   officeEndTime: { type: String, default: '18:00' },   // HH:mm format
   isLocked: { type: Boolean, default: false },
   /** Preset names for UPI / collection account when logging payments (admin-managed) */
-  collectionAccountLabels: { type: [String], default: ['Prit', 'Abhay', 'Pradip'] },
+  collectionAccountLabels: { type: [String], default: [] },
   updatedAt: { type: Date, default: Date.now }
 });
 
 export const SystemSettings = mongoose.model('SystemSettings', settingsSchema);
+
+/** One canonical settings document; if legacy duplicates exist, use the oldest by `_id` so reads/writes match. */
+export async function getSingletonSystemSettings() {
+  return SystemSettings.findOne().sort({ _id: 1 });
+}
 
 const attendanceSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -128,11 +144,13 @@ export const DailyReport = mongoose.model('DailyReport', dailyReportSchema);
 
 const paymentSchema = new mongoose.Schema({
   leadId: { type: mongoose.Schema.Types.ObjectId, ref: 'Lead', required: true },
+  /** Embedded trade subdocument `_id` on the lead — which buy this payment settles. */
+  tradeId: { type: mongoose.Schema.Types.ObjectId },
   agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   amount: { type: Number, required: true },
   status: { type: String, enum: ['Pending', 'Received'], default: 'Pending' },
   accountUsed: { type: String }, // e.g., 'UPI', 'Bank Transfer', 'Cash'
-  /** Which UPI / collection account (e.g. agent name: Prit, Abhay, Pradip) */
+  /** Which UPI / collection account (e.g. preset name or free text from "Other") */
   collectionAccountLabel: { type: String },
   expectedDate: { type: Date },
   /** When pending: expected date+time client will clear payment (optional, overrides date-only) */

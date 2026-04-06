@@ -5,9 +5,14 @@ export const initCronJobs = () => {
   // Run every day at 23:55 (11:55 PM) to mark absent agents
   cron.schedule('55 23 * * *', async () => {
     try {
+      const now = new Date();
+      if (now.getUTCDay() === 0) {
+        console.log('Auto-absent skipped: Sunday (UTC) — office closed.');
+        return;
+      }
       console.log('Running auto-absent cron job...');
-      const today = new Date().toISOString().split('T')[0];
-      
+      const today = now.toISOString().split('T')[0];
+
       const activeAgents = await User.find({ role: 'agent', isActive: true });
       
       for (const agent of activeAgents) {

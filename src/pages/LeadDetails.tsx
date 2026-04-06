@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.tsx';
 import { useNotifications } from '../context/NotificationContext.tsx';
@@ -12,7 +12,8 @@ import {
   Save,
   User as UserIcon,
   TrendingUp,
-  Tag
+  Tag,
+  UserMinus,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import api from '../services/api.ts';
@@ -39,10 +40,12 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
   const [note, setNote] = useState('');
   const [updating, setUpdating] = useState(false);
   const [addingTrade, setAddingTrade] = useState(false);
-  const [tradeCapital, setTradeCapital] = useState('');
+  /** Client capital (₹) — stored on lead as `clientCapital`; not sent with trade log. */
+  const [referenceCapital, setReferenceCapital] = useState('');
   const [tradeBuyQuantity, setTradeBuyQuantity] = useState('');
   const [tradeProfit, setTradeProfit] = useState('');
   const [tradeError, setTradeError] = useState('');
+  const [markingInactive, setMarkingInactive] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(false);
   const [dailyTradeSlots, setDailyTradeSlots] = useState<string[]>([]);
   const [selectedTradeSlot, setSelectedTradeSlot] = useState('');
@@ -53,10 +56,12 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
   const [paymentAccount, setPaymentAccount] = useState('UPI');
   const [paymentExpectedDate, setPaymentExpectedDate] = useState('');
   const [paymentExpectedClearanceAt, setPaymentExpectedClearanceAt] = useState('');
-  const [collectionLabels, setCollectionLabels] = useState<string[]>(['Prit', 'Abhay', 'Pradip']);
-  const [paymentUPIHolder, setPaymentUPIHolder] = useState('Prit');
+  const [collectionLabels, setCollectionLabels] = useState<string[]>([]);
+  const [paymentUPIHolder, setPaymentUPIHolder] = useState('Other');
   const [paymentUPIOther, setPaymentUPIOther] = useState('');
   const [paymentError, setPaymentError] = useState('');
+  /** Embedded trade `_id` — required when logging a payment */
+  const [paymentTradeId, setPaymentTradeId] = useState('');
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
   const [selectedAgent, setSelectedAgent] = useState('');
@@ -71,6 +76,11 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
       setSelectedAgent(data.assignedAgent?._id || data.assignedAgent || '');
       if (data.nextFollowUpDate) {
         setNextFollowUpDate(new Date(data.nextFollowUpDate).toISOString().split('T')[0]);
+      }
+      if (data.clientCapital != null && data.clientCapital !== '') {
+        setReferenceCapital(String(data.clientCapital));
+      } else {
+        setReferenceCapital('');
       }
     } catch (error) {
       console.error('Error fetching lead:', error);
@@ -100,9 +110,13 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
       try {
         const res = await api.get('/leads/collection-labels');
         const labels: string[] = Array.isArray(res.data?.labels) ? res.data.labels : [];
-        if (cancelled || labels.length === 0) return;
+        if (cancelled) return;
         setCollectionLabels(labels);
-        setPaymentUPIHolder((prev) => (labels.includes(prev) ? prev : labels[0]));
+        if (labels.length === 0) {
+          setPaymentUPIHolder('Other');
+        } else {
+          setPaymentUPIHolder((prev) => (labels.includes(prev) ? prev : labels[0]));
+        }
       } catch {
         /* keep defaults */
       }
@@ -141,6 +155,9 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
     setPaymentOpen(false);
     setTradeError('');
     setPaymentError('');
+    setReferenceCapital('');
+    setTradeBuyQuantity('');
+    setTradeProfit('');
   }, [id]);
 
   useEffect(() => {
@@ -185,12 +202,23 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
       return;
     }
 
+    const capTrim = referenceCapital.trim();
+    if (capTrim !== '' && (Number.isNaN(Number(capTrim)) || Number(capTrim) < 0)) {
+      addNotification({
+        title: 'Invalid capital',
+        message: 'Enter a valid non-negative amount for client capital, or leave it empty.',
+        type: 'warning',
+      });
+      return;
+    }
+
     setUpdating(true);
     try {
       await api.patch(`/leads/${id}/status`, {
         status,
         followUpDate: nextFollowUpDate, // Note: backend for status uses followUpDate, we align it inside the payload
-        note
+        note,
+        clientCapital: capTrim === '' ? null : Number(capTrim),
       });
 
       if (status !== lead.status) {
@@ -235,22 +263,19 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
     if (!id) return;
     setTradeError('');
 
-    if (!tradeCapital || !tradeBuyQuantity) {
-       setTradeError('Capital and Buy Qty are required.');
-       return;
+    if (!tradeBuyQuantity) {
+      setTradeError('Buy Qty is required.');
+      return;
     }
     if (dailyTradeSlots.length > 0 && !selectedTradeSlot) {
       setTradeError('Select today\'s trade from the dropdown.');
       return;
     }
-    if (Number(tradeCapital) > 500000) {
-      if (!window.confirm('Large capital amount detected (> ₹5,00,000). Confirm?')) return;
-    }
-    
+
     setAddingTrade(true);
     try {
       const resp = await api.post(`/leads/${id}/trades`, {
-        capital: tradeCapital,
+        capital: 0,
         buyQuantity: tradeBuyQuantity,
         profit: tradeProfit,
         ...(dailyTradeSlots.length > 0 && selectedTradeSlot
@@ -267,7 +292,6 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
          resp.data.warnings.forEach((w: string) => addNotification({ title: 'Margin Warning', message: w, type: 'warning' }));
       }
       
-      setTradeCapital('');
       setTradeBuyQuantity('');
       setTradeProfit('');
       setTradeError('');
@@ -293,12 +317,20 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
     if (Number(paymentAmount) > 200000) {
       if (!window.confirm('Large payment amount detected (> ₹2,00,000). Confirm?')) return;
     }
-    if (paymentAccount === 'UPI' && paymentUPIHolder === 'Other' && !paymentUPIOther.trim()) {
-      setPaymentError('Enter the UPI / account name for "Other".');
+    if (
+      paymentAccount === 'UPI' &&
+      (paymentUPIHolder === 'Other' || collectionLabels.length === 0) &&
+      !paymentUPIOther.trim()
+    ) {
+      setPaymentError('Enter the UPI / account name (or use a saved preset).');
       return;
     }
     if (paymentStatus === 'Pending' && !paymentExpectedDate && !paymentExpectedClearanceAt) {
       setPaymentError('For pending payments, set expected clearance (date or date & time).');
+      return;
+    }
+    if (!paymentTradeId) {
+      setPaymentError('Select which trade this payment is for.');
       return;
     }
 
@@ -312,6 +344,7 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
     setAddingPayment(true);
     try {
       const resp = await api.post(`/leads/${id}/payments`, {
+        tradeId: paymentTradeId,
         amount: paymentAmount,
         status: paymentStatus,
         accountUsed: paymentAccount,
@@ -332,7 +365,7 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
       setPaymentAccount('UPI');
       setPaymentExpectedDate('');
       setPaymentExpectedClearanceAt('');
-      setPaymentUPIHolder(collectionLabels[0] ?? 'Prit');
+      setPaymentUPIHolder(collectionLabels[0] ?? 'Other');
       setPaymentUPIOther('');
       setPaymentError('');
       fetchLead();
@@ -342,6 +375,56 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
     } finally {
       setAddingPayment(false);
     }
+  };
+
+  /** Match server trade-queue rules (UTC day): FT only on scheduled `readyForDate`; active clients any day. Must run before any early return (Rules of Hooks). */
+  const canShowTradeAndPayment = useMemo(() => {
+    if (!lead) return false;
+    if (user?.role !== 'agent' && user?.role !== 'admin') return false;
+    if (!(lead.isActiveClient || lead.isFreshTrader)) return false;
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (lead.isFreshTrader) {
+      if (!lead.readyForDate) return false;
+      const readyStr = new Date(lead.readyForDate).toISOString().split('T')[0];
+      return readyStr === todayStr;
+    }
+    return !!lead.isActiveClient;
+  }, [lead, user?.role]);
+
+  const tradesSorted = useMemo(() => {
+    if (!lead?.trades?.length) return [];
+    return [...lead.trades].sort(
+      (a: any, b: any) =>
+        new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()
+    );
+  }, [lead?.trades]);
+
+  const tradeById = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const t of lead?.trades ?? []) {
+      if (t?._id) m.set(String(t._id), t);
+    }
+    return m;
+  }, [lead?.trades]);
+
+  useEffect(() => {
+    if (!tradesSorted.length) {
+      setPaymentTradeId('');
+      return;
+    }
+    const ids = tradesSorted.map((t: any) => t._id).filter(Boolean);
+    setPaymentTradeId((prev) => {
+      if (prev && ids.some((id) => String(id) === String(prev))) return prev;
+      return String(ids[0] ?? '');
+    });
+  }, [tradesSorted]);
+
+  const tradeOptionLabel = (t: any) => {
+    if (!t) return '';
+    const when = t.date ? format(new Date(t.date), 'MMM d, yyyy · HH:mm') : '?';
+    const slot = t.tradeSlotName ? ` · ${t.tradeSlotName}` : '';
+    const qty = t.buyQuantity != null ? ` · qty ${Number(t.buyQuantity).toLocaleString('en-IN')}` : '';
+    return `${when}${slot}${qty}`;
   };
 
   if (loading) return <div className="animate-pulse space-y-8">
@@ -379,8 +462,13 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                   {lead.name.charAt(0)}
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold text-app-text-active flex items-center gap-3">
+                  <h1 className="text-2xl font-bold text-app-text-active flex items-center gap-3 flex-wrap">
                     {lead.name}
+                    {lead.isActiveClient && (
+                      <span className="px-3 py-1 bg-cyan-500/15 text-cyan-400 rounded-full text-xs font-bold border border-cyan-500/30 uppercase tracking-widest">
+                        Active client
+                      </span>
+                    )}
                     {lead.isFreshTrader && (
                       <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200 uppercase tracking-widest shadow-sm shadow-black/5">
                         FT Tomorrow
@@ -490,6 +578,52 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
              {lead.isActiveClient ? "Already Active Client" : "Mark as Fresh Trader (FT)"}
           </button>
 
+          {(lead.isActiveClient || lead.isFreshTrader) &&
+            (user?.role === 'agent' || user?.role === 'admin') && (
+              <div className="rounded-2xl border border-rose-500/25 bg-rose-500/5 p-4 space-y-3">
+                <p className="text-xs text-app-text-muted leading-relaxed">
+                  Use when this client <strong className="text-app-text">stopped trading</strong> with you. They will no
+                  longer count as an active client or scheduled FT in office metrics. You can mark FT again later if
+                  they return.
+                </p>
+                <button
+                  type="button"
+                  disabled={markingInactive}
+                  onClick={async () => {
+                    if (
+                      !window.confirm(
+                        'Mark this client inactive? They will be removed from active / FT counts until you set them up again.'
+                      )
+                    ) {
+                      return;
+                    }
+                    try {
+                      setMarkingInactive(true);
+                      await api.patch(`/leads/${id}/client-inactive`);
+                      addNotification({
+                        title: 'Updated',
+                        message: 'Client marked inactive.',
+                        type: 'success',
+                      });
+                      fetchLead();
+                    } catch (e: any) {
+                      addNotification({
+                        title: 'Error',
+                        message: e.response?.data?.message || 'Could not update client.',
+                        type: 'error',
+                      });
+                    } finally {
+                      setMarkingInactive(false);
+                    }
+                  }}
+                  className="w-full py-3 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 font-bold text-sm hover:bg-rose-500/20 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <UserMinus size={18} />
+                  {markingInactive ? 'Saving…' : 'Mark client inactive'}
+                </button>
+              </div>
+            )}
+
           <div className="bg-app-surface p-8 rounded-2xl border border-app-border shadow-sm shadow-black/5">
             <h3 className="text-lg font-bold text-app-text-active mb-6 flex items-center gap-2">
               <TrendingUp size={20} className="text-blue-600" />
@@ -536,6 +670,9 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                     <option value="New">New</option>
                     <option value="Interested">Interested</option>
                     <option value="Callback">Callback</option>
+                    <option value="Ringing">Ringing</option>
+                    <option value="SwitchOff">Switch off</option>
+                    <option value="NumberNotValid">Number not valid</option>
                     <option value="Converted" disabled={user ? !canConvertForRole(lead, user) : true}>
                       Paid client
                     </option>
@@ -570,6 +707,24 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                 </div>
               )}
 
+              {(user?.role === 'admin' || user?.role === 'agent') && (
+                <div>
+                  <label className="block text-sm font-medium text-app-text mb-2">Client capital (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={referenceCapital}
+                    onChange={(e) => setReferenceCapital(e.target.value)}
+                    className="w-full px-4 py-3 bg-app-root border border-app-border rounded-xl focus:ring-2 focus:border-blue-500 focus:ring-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                    placeholder="How much capital this client has (stored on the lead)"
+                  />
+                  <p className="text-[10px] text-app-text-muted mt-1.5">
+                    Saved when you click <strong className="text-app-text">Save changes</strong>. Separate from daily trade qty/profit.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-app-text mb-2">Add Note</label>
                 <textarea
@@ -593,21 +748,162 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
             </form>
           </div>
 
+          {(user?.role === 'admin' || user?.role === 'agent') && (
+            <div className="bg-app-surface p-8 rounded-2xl border border-app-border shadow-sm shadow-black/5 space-y-8">
+              <div>
+                <h3 className="text-lg font-bold text-app-text-active mb-1 flex items-center gap-2">
+                  <History size={20} className="text-violet-500" />
+                  Trade history
+                </h3>
+                <p className="text-xs text-app-text-muted mb-4">
+                  <span className="font-semibold text-app-text-active">Client:</span> {lead.name}
+                  {lead.phone ? (
+                    <span className="text-app-text-muted"> · {lead.phone}</span>
+                  ) : null}
+                </p>
+                <p className="text-[10px] text-app-text-muted mb-3 leading-relaxed">
+                  Each row is one <strong className="text-app-text">buy</strong>. When you log a payment you must pick that
+                  trade — commission rows link to it in the payment table below.
+                </p>
+                {tradesSorted.length === 0 ? (
+                  <p className="text-sm text-app-text-muted">No trades recorded for this client yet.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-app-border bg-app-root/50">
+                    <table className="w-full text-xs sm:text-sm text-left">
+                      <thead>
+                        <tr className="border-b border-app-border text-app-text-muted uppercase tracking-wider text-[10px]">
+                          <th className="px-3 py-2 font-bold">When (logged)</th>
+                          <th className="px-3 py-2 font-bold">Which trade</th>
+                          <th className="px-3 py-2 font-bold">Type</th>
+                          <th className="px-3 py-2 font-bold text-right">Capital (₹)</th>
+                          <th className="px-3 py-2 font-bold text-right">Buy qty</th>
+                          <th className="px-3 py-2 font-bold text-right">Profit (₹)</th>
+                          <th className="px-3 py-2 font-bold">Linked payments</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tradesSorted.map((t: any, i: number) => {
+                          const linked = (lead.payments ?? []).filter(
+                            (p: any) => p.tradeId && String(p.tradeId) === String(t._id)
+                          );
+                          return (
+                            <tr key={t._id ?? i} className="border-b border-app-border/80 last:border-0 hover:bg-app-surface-hover/40">
+                              <td className="px-3 py-2.5 text-app-text-active whitespace-nowrap">
+                                {t.date ? format(new Date(t.date), 'MMM d, yyyy · HH:mm') : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-app-text-muted max-w-[10rem]">
+                                {t.tradeSlotName || '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-app-text-muted capitalize">{t.type || 'buy'}</td>
+                              <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                                {t.capital != null ? Number(t.capital).toLocaleString('en-IN') : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                                {t.buyQuantity != null ? Number(t.buyQuantity).toLocaleString('en-IN') : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                                {t.profit != null ? Number(t.profit).toLocaleString('en-IN') : '—'}
+                              </td>
+                              <td className="px-3 py-2.5 text-[10px] text-app-text-muted align-top max-w-[14rem]">
+                                {linked.length === 0 ? (
+                                  <span className="text-app-text-muted/60">—</span>
+                                ) : (
+                                  <ul className="space-y-1">
+                                    {linked.map((p: any) => (
+                                      <li key={p._id}>
+                                        ₹{Number(p.amount).toLocaleString('en-IN')} · {p.status}
+                                        {p.commission?.agentShare != null
+                                          ? ` · ag. ₹${Number(p.commission.agentShare).toLocaleString('en-IN')}`
+                                          : ''}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-bold text-app-text-active mb-1 flex items-center gap-2">
+                  Payment &amp; commission
+                </h4>
+                <p className="text-[10px] text-app-text-muted mb-3">
+                  Each payment is tied to one trade. Older rows may show &quot;Legacy&quot; if logged before trade linking
+                  existed.
+                </p>
+                {!Array.isArray(lead.payments) || lead.payments.length === 0 ? (
+                  <p className="text-sm text-app-text-muted">No payments logged for this client yet.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-xl border border-app-border bg-app-root/50">
+                    <table className="w-full text-xs sm:text-sm text-left">
+                      <thead>
+                        <tr className="border-b border-app-border text-app-text-muted uppercase tracking-wider text-[10px]">
+                          <th className="px-3 py-2 font-bold">For trade</th>
+                          <th className="px-3 py-2 font-bold">Date</th>
+                          <th className="px-3 py-2 font-bold text-right">Amount (₹)</th>
+                          <th className="px-3 py-2 font-bold">Status</th>
+                          <th className="px-3 py-2 font-bold text-right">Commission (₹)</th>
+                          <th className="px-3 py-2 font-bold text-right">Your share (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lead.payments.map((p: any) => (
+                          <tr
+                            key={p._id}
+                            className="border-b border-app-border/80 last:border-0 hover:bg-app-surface-hover/40"
+                          >
+                            <td className="px-3 py-2.5 text-app-text-muted text-[10px] max-w-[11rem]">
+                              {p.tradeId
+                                ? tradeOptionLabel(tradeById.get(String(p.tradeId))) || '—'
+                                : 'Legacy (not linked)'}
+                            </td>
+                            <td className="px-3 py-2.5 text-app-text-active whitespace-nowrap">
+                              {p.date ? format(new Date(p.date), 'MMM d, yyyy · HH:mm') : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                              {p.amount != null ? Number(p.amount).toLocaleString('en-IN') : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-app-text-muted">{p.status ?? '—'}</td>
+                            <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                              {p.commission?.total != null
+                                ? Number(p.commission.total).toLocaleString('en-IN')
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-app-text tabular-nums">
+                              {p.commission?.agentShare != null
+                                ? Number(p.commission.agentShare).toLocaleString('en-IN')
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {lead.isFreshTrader && lead.readyForDate && !canShowTradeAndPayment && (user?.role === 'agent' || user?.role === 'admin') ? (
+            <div className="rounded-2xl border border-app-border/80 bg-app-root/50 px-4 py-3 text-xs text-app-text-muted">
+              <span className="font-semibold text-app-text">FT scheduled for </span>
+              {format(new Date(lead.readyForDate), 'MMM d, yyyy')} (UTC). Daily trade and payment forms open on that day.
+            </div>
+          ) : null}
+
+          {canShowTradeAndPayment ? (
+            <>
           <div id="trade-section" className="bg-app-surface p-8 rounded-2xl border border-app-border shadow-sm shadow-black/5 mt-8 scroll-mt-24">
             <h3 className="text-lg font-bold text-app-text-active mb-6 flex items-center gap-2">
               <TrendingUp size={20} className="text-blue-600" />
               Add Daily Trade Log
             </h3>
-            {lead.trades?.length > 0 && (
-              <p className="text-xs text-app-text-muted mb-4">
-                Last trade
-                {lead.trades[lead.trades.length - 1]?.tradeSlotName
-                  ? ` (${lead.trades[lead.trades.length - 1].tradeSlotName})`
-                  : ''}
-                : profit ₹{lead.trades[lead.trades.length - 1]?.profit ?? 0} — use payment section below to log margin
-                / commission after the trade.
-              </p>
-            )}
             <form onSubmit={handleAddTrade} className="space-y-4">
               {dailyTradeSlots.length > 0 ? (
                 <div>
@@ -632,14 +928,10 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                 </div>
               ) : (
                 <p className="text-xs text-app-text-muted rounded-xl border border-app-border/80 bg-app-root/80 px-3 py-2">
-                  No named trades for today (UTC) yet — admin can add Trade 1, Trade 2, etc. on the dashboard. You can still log capital, qty, and profit.
+                  No named trades for today (UTC) yet — admin can add Trade 1, Trade 2, etc. on the dashboard. You can still log buy qty and profit below.
                 </p>
               )}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-app-text mb-1">Capital (₹)</label>
-                  <input type="number" required value={tradeCapital} onChange={e => setTradeCapital(e.target.value)} className="w-full px-4 py-2 bg-app-root border border-app-border rounded-xl focus:border-blue-500 focus:ring-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-app-text mb-1">Buy Qty</label>
                   <input type="number" required value={tradeBuyQuantity} onChange={e => setTradeBuyQuantity(e.target.value)} className="w-full px-4 py-2 bg-app-root border border-app-border rounded-xl focus:border-blue-500 focus:ring-1 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none" />
@@ -669,6 +961,29 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
               Log Financial Payment
             </h3>
             <form onSubmit={handleAddPayment} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-app-text-muted uppercase tracking-wider mb-1">
+                  Payment for which trade?
+                </label>
+                {tradesSorted.length === 0 ? (
+                  <p className="text-xs text-amber-200/90 bg-amber-950/30 border border-amber-500/25 rounded-lg px-3 py-2">
+                    Add a trade first — payments must be linked to a specific buy.
+                  </p>
+                ) : (
+                  <select
+                    required
+                    value={paymentTradeId}
+                    onChange={(e) => setPaymentTradeId(e.target.value)}
+                    className="w-full px-4 py-3 bg-app-root border border-app-border rounded-xl text-app-text-active focus:ring-emerald-500 outline-none text-sm"
+                  >
+                    {tradesSorted.filter((t: any) => t._id).map((t: any) => (
+                      <option key={String(t._id)} value={String(t._id)}>
+                        {tradeOptionLabel(t)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-app-text mb-1">Amount Given (₹)</label>
@@ -745,12 +1060,18 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                  </div>
               )}
 
-              <button disabled={addingPayment} type="submit" className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 shadow-sm shadow-black/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2">
+              <button
+                disabled={addingPayment || tradesSorted.length === 0}
+                type="submit"
+                className="w-full py-3 bg-emerald-600 text-white font-semibold rounded-xl hover:bg-emerald-700 shadow-sm shadow-black/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-2"
+              >
                 <Save size={18} />
                 {addingPayment ? 'Saving...' : 'Add Payment'}
               </button>
             </form>
           </div>
+            </>
+          ) : null}
         </div>
       </div>
     </div>
