@@ -630,7 +630,7 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
               Pipeline & notes
             </h3>
             <p className="text-xs text-app-text-muted mb-6 -mt-2">
-              Choose lead status, add a note if needed, then save. Callback requires a follow-up date.
+              Choose lead status, add a note if needed, then save. Callback and Call forward require a follow-up date.
             </p>
             <form onSubmit={handleUpdate} className="space-y-6">
               {user?.role === 'admin' && (
@@ -670,9 +670,13 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                     <option value="New">New</option>
                     <option value="Interested">Interested</option>
                     <option value="Callback">Callback</option>
+                    <option value="CallForward">Call forward</option>
                     <option value="Ringing">Ringing</option>
                     <option value="SwitchOff">Switch off</option>
                     <option value="NumberNotValid">Number not valid</option>
+                    <option value="WhatsAppMessaged">WhatsApp messaged</option>
+                    <option value="Hangup">Hang up</option>
+                    <option value="NotInterested">Not interested</option>
                     <option value="Converted" disabled={user ? !canConvertForRole(lead, user) : true}>
                       Paid client
                     </option>
@@ -694,9 +698,9 @@ export const LeadDetails: React.FC<LeadDetailsProps> = ({ inlineId }) => {
                 </p>
               ) : null}
 
-              {status === 'Callback' && (
+              {(status === 'Callback' || status === 'CallForward') && (
                 <div>
-                  <label className="block text-sm font-medium text-app-text mb-2">Pipeline Callback Date</label>
+                  <label className="block text-sm font-medium text-app-text mb-2">Pipeline follow-up date</label>
                   <input
                     type="date"
                     required

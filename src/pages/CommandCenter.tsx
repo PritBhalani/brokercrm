@@ -16,7 +16,7 @@ const AgentRibbon: React.FC<{ agentId: string }> = ({ agentId }) => {
   }, [agentId]);
 
   if (loading) return (
-    <tr><td colSpan={6} className="bg-slate-900/50 px-8 py-4">
+    <tr><td colSpan={7} className="bg-slate-900/50 px-8 py-4">
       <div className="flex gap-4">
         {[1,2,3].map(i => <div key={i} className="flex-1 h-16 bg-slate-800 rounded-xl animate-pulse" />)}
       </div>
@@ -24,53 +24,83 @@ const AgentRibbon: React.FC<{ agentId: string }> = ({ agentId }) => {
   );
   if (!data) return null;
 
-  const bought = data.clientList?.bought?.length ?? 0;
-  const notBought = data.clientList?.notBought?.length ?? 0;
-  const received = data.payments?.received ?? [];
-  const pending = data.payments?.pending ?? [];
-  const receivedSum = received.reduce((s: number, p: any) => s + p.amount, 0);
-  const pendingSum = pending.reduce((s: number, p: any) => s + p.amount, 0);
+  const rows: any[] = Array.isArray(data.pipelineClients) ? data.pipelineClients : [];
 
   return (
     <tr className="border-b border-slate-800">
-      <td colSpan={6} className="bg-slate-950/80 px-6 py-4 border-l-4 border-l-blue-500/40">
-        <div className="grid grid-cols-2 gap-4 max-w-3xl">
-
-          {/* Clients */}
-          <div className="bg-slate-900 rounded-xl p-4 border border-slate-800">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3">Clients Today</p>
-            <div className="space-y-1.5 text-sm font-semibold">
-              <div className="flex justify-between">
-                <span className="text-slate-400">✅ Traded</span>
-                <span className="text-emerald-400">{bought}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">❌ No Trade</span>
-                <span className="text-rose-400">{notBought}</span>
-              </div>
-            </div>
+      <td colSpan={7} className="bg-slate-950/80 px-4 py-4 sm:px-6 border-l-4 border-l-blue-500/40">
+        <div className="max-w-5xl">
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-2">
+            Active &amp; FT pipeline <span className="text-slate-600 font-normal normal-case">(today / tomorrow UTC)</span>
+          </p>
+          <p className="text-[9px] text-slate-600 mb-3 leading-snug">
+            Buy qty = buy trades logged today (UTC). Received = payments marked received today (UTC). Pending = all open
+            pending on that client.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/90">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-500">
+                  <th className="px-3 py-2 font-bold">Client</th>
+                  <th className="px-3 py-2 font-bold">Tags</th>
+                  <th className="px-3 py-2 font-bold tabular-nums text-right">Buy qty (today)</th>
+                  <th className="px-3 py-2 font-bold tabular-nums text-right">Received</th>
+                  <th className="px-3 py-2 font-bold tabular-nums text-right">Pending</th>
+                  <th className="px-3 py-2 font-bold w-16" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/80">
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-6 text-center text-slate-500 italic">
+                      No active clients or FT scheduled for today / tomorrow (UTC).
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((row: any) => (
+                    <tr key={String(row._id)} className="text-slate-200 hover:bg-slate-800/40">
+                      <td className="px-3 py-2.5 font-semibold text-white">
+                        {row.name}
+                        {row.phone ? (
+                          <span className="block text-[10px] text-slate-500 font-normal font-mono mt-0.5">{row.phone}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex flex-wrap gap-1">
+                          {(row.tags ?? []).map((t: string) => (
+                            <span
+                              key={t}
+                              className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400 border border-slate-700"
+                            >
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-amber-400 font-bold">
+                        {(row.buyQtyToday ?? 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-400 font-bold">
+                        ₹{(row.receivedToday ?? 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-rose-400 font-bold">
+                        ₹{(row.pendingOpen ?? 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Link
+                          to={`/leads/${row._id}`}
+                          className="text-[10px] font-black uppercase text-blue-400 hover:text-blue-300 whitespace-nowrap"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Lead
+                        </Link>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-
-          {/* Payments */}
-          <div className="bg-slate-900 rounded-xl p-4 border border-slate-800">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3">Payments</p>
-            <div className="space-y-1.5 text-sm font-semibold">
-              <div className="flex justify-between">
-                <span className="text-slate-400">Received</span>
-                <span className="text-emerald-400">₹{receivedSum.toLocaleString('en-IN')}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">Pending</span>
-                <span className="text-rose-400">₹{pendingSum.toLocaleString('en-IN')}</span>
-              </div>
-              {received.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] text-slate-600">
-                  {[...new Set(received.map((p: any) => p.accountUsed))].join(' · ')}
-                </div>
-              )}
-            </div>
-          </div>
-
         </div>
       </td>
     </tr>
@@ -157,6 +187,8 @@ export const CommandCenter: React.FC = () => {
   const safeReports = Array.isArray(reports) ? reports : [];
   const totalCollection    = safeReports.reduce((s, r) => s + (r.paymentsCollected  || 0), 0);
   const totalPending       = safeReports.reduce((s, r) => s + (r.pendingPayments    || 0), 0);
+  const totalFTToday     = safeReports.reduce((s, r) => s + (r.freshTradersDueToday  || 0), 0);
+  const totalTodayPipe   = safeReports.reduce((s, r) => s + (r.todayPipelineCount   || 0), 0);
   const totalFT            = safeReports.reduce((s, r) => s + (r.freshTraders       || 0), 0);
   const totalTomorrowActive = safeReports.reduce((s, r) => s + (r.tomorrowActiveClients || 0), 0);
   const totalTrades        = safeReports.reduce((s, r) => s + (r.clientsBoughtCount || 0), 0);
@@ -266,7 +298,9 @@ export const CommandCenter: React.FC = () => {
           </div>
           <div className="flex gap-6 items-center">
             <div className="text-center">
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Pending</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">
+                Pending <span className="text-slate-600 normal-case font-medium">(today UTC)</span>
+              </p>
               <p className="text-xl font-black text-rose-400">₹{totalPending.toLocaleString('en-IN')}</p>
             </div>
             <div className="w-px h-10 bg-slate-800" />
@@ -330,7 +364,7 @@ export const CommandCenter: React.FC = () => {
 
         {/* God Table */}
         <div className="w-full overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-sm shadow-black/15">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
               <tr className="bg-slate-950 border-b border-slate-800 text-[10px] uppercase tracking-widest text-slate-500">
                 <th className="p-3 pl-4 sticky left-0 z-10 bg-slate-950 border-r border-slate-800 w-8" />
@@ -338,13 +372,22 @@ export const CommandCenter: React.FC = () => {
                 <th className="p-3 font-bold border-r border-slate-800">Active<br/><span className="text-[9px] text-slate-700">clients</span></th>
                 <th className="p-3 font-bold border-r border-slate-800">Traded<br/><span className="text-[9px] text-slate-700">bought / qty</span></th>
                 <th className="p-3 font-bold border-r border-slate-800">Payments<br/><span className="text-[9px] text-slate-700">coll / pend</span></th>
-                <th className="p-3 font-bold">Tomorrow<br/><span className="text-[9px] text-slate-700">ft / active</span></th>
+                <th className="p-3 font-bold border-r border-slate-800">
+                  Today<br />
+                  <span className="text-[9px] text-slate-700 font-normal">ft / active</span>{' '}
+                  <span className="text-[8px] text-slate-600">(UTC)</span>
+                </th>
+                <th className="p-3 font-bold">
+                  Tomorrow<br />
+                  <span className="text-[9px] text-slate-700 font-normal">ft / active</span>{' '}
+                  <span className="text-[8px] text-slate-600">(UTC)</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {filteredReports.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-500 font-bold">
+                  <td colSpan={7} className="p-8 text-center text-slate-500 font-bold">
                     No agents match this filter.
                   </td>
                 </tr>
@@ -420,9 +463,16 @@ export const CommandCenter: React.FC = () => {
                         </span>
                       </td>
 
+                      {/* Today: FT due today / pipeline (active ∪ FT today) */}
+                      <td className="p-3 border-r border-slate-800 font-bold whitespace-nowrap text-sm tabular-nums">
+                        <span className="text-cyan-400">{report.freshTradersDueToday ?? 0}</span>
+                        <span className="text-slate-700 mx-1.5">/</span>
+                        <span className="text-indigo-400">{report.todayPipelineCount ?? 0}</span>
+                      </td>
+
                       {/* Tomorrow */}
-                      <td className="p-3 font-bold whitespace-nowrap text-sm">
-                        <span className="text-cyan-400">{report.freshTraders ?? 0}</span>
+                      <td className="p-3 font-bold whitespace-nowrap text-sm tabular-nums">
+                        <span className="text-teal-400">{report.freshTraders ?? 0}</span>
                         <span className="text-slate-700 mx-1.5">/</span>
                         <span className="text-indigo-400">{report.tomorrowActiveClients ?? 0}</span>
                       </td>
@@ -454,8 +504,13 @@ export const CommandCenter: React.FC = () => {
                     <span className="text-slate-700 mx-1.5">/</span>
                     <span className="text-rose-400">₹{totalPending.toLocaleString()}</span>
                   </td>
-                  <td className="p-3">
-                    <span className="text-cyan-400">{totalFT}</span>
+                  <td className="p-3 border-r border-slate-800 tabular-nums">
+                    <span className="text-cyan-400">{totalFTToday}</span>
+                    <span className="text-slate-700 mx-1.5">/</span>
+                    <span className="text-indigo-400">{totalTodayPipe}</span>
+                  </td>
+                  <td className="p-3 tabular-nums">
+                    <span className="text-teal-400">{totalFT}</span>
                     <span className="text-slate-700 mx-1.5">/</span>
                     <span className="text-indigo-400">{totalTomorrowActive}</span>
                   </td>

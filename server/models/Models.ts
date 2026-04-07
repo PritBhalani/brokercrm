@@ -26,6 +26,10 @@ const leadSchema = new mongoose.Schema({
       'Ringing',
       'SwitchOff',
       'NumberNotValid',
+      'WhatsAppMessaged',
+      'Hangup',
+      'NotInterested',
+      'CallForward',
     ],
     default: 'New' 
   },

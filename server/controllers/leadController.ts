@@ -257,13 +257,30 @@ export const updateLeadStatus = async (req: any, res: Response) => {
         Ringing: 'contacted',
         SwitchOff: 'follow_up',
         NumberNotValid: 'not_interested',
+        WhatsAppMessaged: 'contacted',
+        Hangup: 'follow_up',
+        NotInterested: 'not_interested',
+        CallForward: 'follow_up',
       };
       lead.internalStatus = mapping[status] || 'new';
 
       // Auto-assign priority
       if (status === 'Converted' || status === 'ReadyToWorkTomorrow') lead.priority = 'high';
-      else if (status === 'Interested' || status === 'Ringing') lead.priority = 'medium';
-      else if (status === 'SwitchOff' || status === 'NumberNotValid') lead.priority = 'low';
+      else if (
+        status === 'Interested' ||
+        status === 'Ringing' ||
+        status === 'WhatsAppMessaged' ||
+        status === 'CallForward'
+      ) {
+        lead.priority = 'medium';
+      } else if (
+        status === 'SwitchOff' ||
+        status === 'NumberNotValid' ||
+        status === 'Hangup' ||
+        status === 'NotInterested'
+      ) {
+        lead.priority = 'low';
+      }
     }
     
     if (status === 'Ready to work tomorrow' || status === 'ReadyToWorkTomorrow') {
@@ -458,10 +475,18 @@ export const addPayment = async (req: any, res: Response) => {
     const ec = expectedClearanceAt ? new Date(expectedClearanceAt) : undefined;
     const ed = expectedDate ? new Date(expectedDate) : ec ? ec : undefined;
 
+    /** Credit the rep who owns the lead, not whoever submits (e.g. admin). */
+    const rawAssign = lead.assignedAgent as { _id?: unknown } | unknown;
+    const assignedAgentId =
+      rawAssign && typeof rawAssign === 'object' && rawAssign !== null && '_id' in rawAssign
+        ? (rawAssign as { _id: unknown })._id
+        : rawAssign;
+    const agentIdForPayment = assignedAgentId ?? req.user._id;
+
     const newPayment = await Payment.create({
       leadId: lead._id,
       tradeId: tradeSub._id,
-      agentId: req.user._id,
+      agentId: agentIdForPayment,
       amount: numAmount,
       status: status || 'Pending',
       accountUsed: accountUsed,

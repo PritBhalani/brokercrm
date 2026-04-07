@@ -543,7 +543,7 @@ export const Dashboard: React.FC = () => {
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-app-text-muted">Team metrics period</p>
           <p className="text-sm text-app-text-muted mt-0.5">
-            Pending, received, trades, and buy qty follow the selected range (UTC). Active = current pipeline snapshot.
+            Received, trades, and buy qty follow the selected range (UTC). Pending is all open pending per agent (not tied to the period). Active = current pipeline snapshot.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -629,7 +629,7 @@ export const Dashboard: React.FC = () => {
             }
           />
           <p className="text-sm text-app-text-muted">
-            Per-agent received vs pending in the table use the same period as above. Use Command Center for more drill-downs.
+            Per-agent received uses the period above; pending shows total outstanding. Use Command Center for more drill-downs.
           </p>
         </Card>
       </section>

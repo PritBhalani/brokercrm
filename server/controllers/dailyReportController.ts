@@ -50,21 +50,62 @@ export const getDailyReport = async (req: Request, res: Response) => {
         }
       },
 
-      // 2. Lookup payments collected by agent today
+      // 2. Payments logged today (UTC): Pending + Received; lead-attributed rows included
       {
         $lookup: {
           from: 'payments',
-          let: { agentId: '$_id' },
+          let: {
+            agentId: '$_id',
+            myLeadIds: { $map: { input: '$leads', as: 'l', in: '$$l._id' } },
+          },
           pipeline: [
-            { $match: { 
-                $expr: { 
-                  $and: [
-                    { $eq: ['$agentId', '$$agentId'] },
-                    { $gte: ['$date', startOfDay] },
-                    { $lte: ['$date', endOfDay] }
-                  ]
-                }
-            }}
+            {
+              $match: {
+                $expr: {
+                  $or: [
+                    {
+                      $and: [
+                        { $eq: ['$agentId', '$$agentId'] },
+                        {
+                          $or: [
+                            {
+                              $and: [
+                                { $eq: ['$status', 'Pending'] },
+                                { $gte: ['$date', startOfDay] },
+                                { $lte: ['$date', endOfDay] },
+                              ],
+                            },
+                            {
+                              $and: [
+                                { $eq: ['$status', 'Received'] },
+                                { $gte: ['$date', startOfDay] },
+                                { $lte: ['$date', endOfDay] },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                    {
+                      $and: [
+                        { $eq: ['$status', 'Pending'] },
+                        { $gte: ['$date', startOfDay] },
+                        { $lte: ['$date', endOfDay] },
+                        { $in: ['$leadId', '$$myLeadIds'] },
+                      ],
+                    },
+                    {
+                      $and: [
+                        { $eq: ['$status', 'Received'] },
+                        { $gte: ['$date', startOfDay] },
+                        { $lte: ['$date', endOfDay] },
+                        { $in: ['$leadId', '$$myLeadIds'] },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
           ],
           as: 'todaysPayments'
         }
@@ -106,6 +147,45 @@ export const getDailyReport = async (req: Request, res: Response) => {
                 input: '$leads',
                 as: 'lead',
                 cond: { $eq: ['$$lead.isActiveClient', true] }
+              }
+            }
+          },
+
+          /** FT with readyForDate on today's UTC day (trade-queue day). */
+          computedFreshTradersDueToday: {
+            $size: {
+              $filter: {
+                input: '$leads',
+                as: 'lead',
+                cond: {
+                  $and: [
+                    { $eq: ['$$lead.isFreshTrader', true] },
+                    { $gte: ['$$lead.readyForDate', startOfDay] },
+                    { $lte: ['$$lead.readyForDate', endOfDay] }
+                  ]
+                }
+              }
+            }
+          },
+
+          /** Same shape as tomorrow pipeline: active clients ∪ FT scheduled for this UTC day. */
+          computedTodayPipeline: {
+            $size: {
+              $filter: {
+                input: '$leads',
+                as: 'lead',
+                cond: {
+                  $or: [
+                    { $eq: ['$$lead.isActiveClient', true] },
+                    {
+                      $and: [
+                        { $eq: ['$$lead.isFreshTrader', true] },
+                        { $gte: ['$$lead.readyForDate', startOfDay] },
+                        { $lte: ['$$lead.readyForDate', endOfDay] }
+                      ]
+                    }
+                  ]
+                }
               }
             }
           },
@@ -254,6 +334,9 @@ export const getDailyReport = async (req: Request, res: Response) => {
               }
             }
           },
+
+          freshTradersDueToday: '$computedFreshTradersDueToday',
+          todayPipelineCount: '$computedTodayPipeline',
 
           // End of Day logic explicitly mapped via override or computation
           freshTraders: {

@@ -25,11 +25,15 @@ const STATUS_BADGE: Record<string, string> = {
   New: 'text-blue-400',
   Interested: 'text-emerald-400',
   Callback: 'text-amber-400',
+  CallForward: 'text-indigo-400',
   Converted: 'text-violet-400',
   ReadyToWorkTomorrow: 'text-cyan-400',
   Ringing: 'text-sky-400',
   SwitchOff: 'text-slate-400',
   NumberNotValid: 'text-rose-400',
+  WhatsAppMessaged: 'text-green-400',
+  Hangup: 'text-orange-400',
+  NotInterested: 'text-neutral-400',
 };
 
 export const AgentDashboard: React.FC = () => {

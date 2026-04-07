@@ -161,8 +161,40 @@ const agentStatsPipelineAllTime = [
   {
     $lookup: {
       from: 'payments',
-      localField: '_id',
-      foreignField: 'agentId',
+      let: {
+        agentId: '$_id',
+        myLeadIds: { $map: { input: '$leads', as: 'l', in: '$$l._id' } },
+      },
+      pipeline: [
+        {
+          $match: {
+            $expr: {
+              $or: [
+                {
+                  $and: [
+                    { $eq: ['$agentId', '$$agentId'] },
+                    {
+                      $or: [{ $eq: ['$status', 'Pending'] }, { $eq: ['$status', 'Received'] }],
+                    },
+                  ],
+                },
+                {
+                  $and: [
+                    { $eq: ['$status', 'Pending'] },
+                    { $in: ['$leadId', '$$myLeadIds'] },
+                  ],
+                },
+                {
+                  $and: [
+                    { $eq: ['$status', 'Received'] },
+                    { $in: ['$leadId', '$$myLeadIds'] },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      ],
       as: 'payments',
     },
   },
@@ -194,6 +226,7 @@ const agentStatsPipelineAllTime = [
           in: { $concatArrays: ['$$value', { $ifNull: ['$$this', []] }] },
         },
       },
+      payments: 1,
     },
   },
   {
@@ -251,10 +284,50 @@ function agentStatsPipelineForRange(rangeStart: Date, rangeEnd: Date) {
     {
       $lookup: {
         from: 'payments',
-        let: { agentId: '$_id' },
+        let: {
+          agentId: '$_id',
+          myLeadIds: { $map: { input: '$leads', as: 'l', in: '$$l._id' } },
+        },
         pipeline: [
-          { $match: { $expr: { $eq: ['$agentId', '$$agentId'] } } },
-          { $match: { date: { $gte: rangeStart, $lte: rangeEnd } } },
+          {
+            $match: {
+              $expr: {
+                $or: [
+                  {
+                    $and: [
+                      { $eq: ['$agentId', '$$agentId'] },
+                      {
+                        $or: [
+                          { $eq: ['$status', 'Pending'] },
+                          {
+                            $and: [
+                              { $eq: ['$status', 'Received'] },
+                              { $gte: ['$date', rangeStart] },
+                              { $lte: ['$date', rangeEnd] },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    $and: [
+                      { $eq: ['$status', 'Pending'] },
+                      { $in: ['$leadId', '$$myLeadIds'] },
+                    ],
+                  },
+                  {
+                    $and: [
+                      { $eq: ['$status', 'Received'] },
+                      { $gte: ['$date', rangeStart] },
+                      { $lte: ['$date', rangeEnd] },
+                      { $in: ['$leadId', '$$myLeadIds'] },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
         ],
         as: 'payments',
       },
@@ -315,6 +388,7 @@ function agentStatsPipelineForRange(rangeStart: Date, rangeEnd: Date) {
             },
           },
         },
+        payments: 1,
       },
     },
     {
@@ -402,6 +476,10 @@ export const getAgentFullSummary = async (req: Request, res: Response) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const startOfDay = new Date(todayStr + 'T00:00:00Z');
     const endOfDay = new Date(todayStr + 'T23:59:59Z');
+    const startOfTomorrow = new Date(startOfDay);
+    startOfTomorrow.setUTCDate(startOfTomorrow.getUTCDate() + 1);
+    const endOfTomorrow = new Date(startOfTomorrow);
+    endOfTomorrow.setUTCHours(23, 59, 59, 999);
 
     const leads = await Lead.find({ assignedAgent: agentId }).lean();
     
@@ -425,9 +503,21 @@ export const getAgentFullSummary = async (req: Request, res: Response) => {
       }
     });
 
+    const assignedLeadIds = leads.map((l: any) => l._id);
+
+    /** Received + Pending: today's UTC window only (Command Center / drilldown). Lead-attributed rows included. */
     const paymentsRaw = await Payment.find({
-      agentId,
-      date: { $gte: startOfDay, $lte: endOfDay }
+      $and: [
+        {
+          $or: [{ agentId }, { leadId: { $in: assignedLeadIds } }],
+        },
+        {
+          $or: [
+            { status: 'Pending', date: { $gte: startOfDay, $lte: endOfDay } },
+            { status: 'Received', date: { $gte: startOfDay, $lte: endOfDay } },
+          ],
+        },
+      ],
     }).lean();
 
     const payLeadIds = [...new Set(paymentsRaw.map((p: any) => p.leadId).filter(Boolean))];
@@ -457,11 +547,77 @@ export const getAgentFullSummary = async (req: Request, res: Response) => {
     const paymentsReceived = payments.filter((p: any) => p.status === 'Received');
     const paymentsPending = payments.filter((p: any) => p.status === 'Pending');
 
+    /** Command Center expand row: active clients ∪ FT due today/tomorrow (UTC). */
+    const pipelineLeads = leads.filter((lead: any) => {
+      if (lead.isActiveClient) return true;
+      if (!lead.isFreshTrader || !lead.readyForDate) return false;
+      const rd = new Date(lead.readyForDate).getTime();
+      const d0 = startOfDay.getTime();
+      const d1 = endOfDay.getTime();
+      const t0 = startOfTomorrow.getTime();
+      const t1 = endOfTomorrow.getTime();
+      return (rd >= d0 && rd <= d1) || (rd >= t0 && rd <= t1);
+    });
+
+    const pipelineIds = pipelineLeads.map((l: any) => l._id);
+    const paymentsForPipeline =
+      pipelineIds.length > 0
+        ? await Payment.find({
+            leadId: { $in: pipelineIds },
+            $or: [
+              { status: 'Pending' },
+              { status: 'Received', date: { $gte: startOfDay, $lte: endOfDay } },
+            ],
+          }).lean()
+        : [];
+
+    const payByLead = new Map<string, { receivedToday: number; pendingOpen: number }>();
+    for (const p of paymentsForPipeline) {
+      const lid = p.leadId?.toString?.() ?? String(p.leadId);
+      if (!lid) continue;
+      if (!payByLead.has(lid)) payByLead.set(lid, { receivedToday: 0, pendingOpen: 0 });
+      const agg = payByLead.get(lid)!;
+      const amt = Number(p.amount) || 0;
+      if (p.status === 'Pending') agg.pendingOpen += amt;
+      else if (p.status === 'Received') agg.receivedToday += amt;
+    }
+
+    const pipelineClients = pipelineLeads
+      .map((lead: any) => {
+        let buyQtyToday = 0;
+        for (const t of lead.trades || []) {
+          const td = new Date(t.date).getTime();
+          if (td < startOfDay.getTime() || td > endOfDay.getTime()) continue;
+          if (String(t.type || 'buy').toLowerCase() !== 'buy') continue;
+          buyQtyToday += Number(t.buyQuantity) || 0;
+        }
+        const tags: string[] = [];
+        if (lead.isActiveClient) tags.push('Active');
+        if (lead.isFreshTrader && lead.readyForDate) {
+          const rd = new Date(lead.readyForDate).getTime();
+          if (rd >= startOfDay.getTime() && rd <= endOfDay.getTime()) tags.push('FT today');
+          if (rd >= startOfTomorrow.getTime() && rd <= endOfTomorrow.getTime()) tags.push('FT tomorrow');
+        }
+        const idStr = lead._id.toString();
+        const agg = payByLead.get(idStr) ?? { receivedToday: 0, pendingOpen: 0 };
+        return {
+          _id: lead._id,
+          name: lead.name,
+          phone: lead.phone ?? '',
+          tags,
+          buyQtyToday,
+          receivedToday: agg.receivedToday,
+          pendingOpen: agg.pendingOpen,
+        };
+      })
+      .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+
     res.json({
       agent: { id: agent._id, name: agent.name },
       clientList: { bought: boughtClients, notBought: notBoughtClients },
       tradesToday,
-      payments: { received: paymentsReceived, pending: paymentsPending }
+      payments: { received: paymentsReceived, pending: paymentsPending },
+      pipelineClients,
     });
 
   } catch (error) {
@@ -478,26 +634,42 @@ export const listPayments = async (req: Request, res: Response) => {
     const filter: any = {};
     if (status === 'Pending' || status === 'Received') filter.status = status;
     if (agentId && mongoose.Types.ObjectId.isValid(agentId)) {
-      filter.agentId = new mongoose.Types.ObjectId(agentId);
+      const oid = new mongoose.Types.ObjectId(agentId);
+      const leadIdsForAgent = await Lead.find({ assignedAgent: oid }).distinct('_id');
+      filter.$or = [{ agentId: oid }, { leadId: { $in: leadIdsForAgent } }];
     }
 
     const paymentsRaw = await Payment.find(filter).sort({ updatedAt: -1 }).limit(500).lean();
 
     const leadIds = [...new Set(paymentsRaw.map((p: any) => p.leadId).filter(Boolean))];
-    const agentIds = [...new Set(paymentsRaw.map((p: any) => p.agentId).filter(Boolean))];
+    const paymentAgentIds = [...new Set(paymentsRaw.map((p: any) => p.agentId).filter(Boolean))];
 
-    const [leadDocs, agentDocs] = await Promise.all([
+    const leadDocs =
       leadIds.length > 0
-        ? Lead.find({ _id: { $in: leadIds } })
-            .select('name phone')
+        ? await Lead.find({ _id: { $in: leadIds } })
+            .select('name phone assignedAgent')
             .lean()
-        : [],
-      agentIds.length > 0
-        ? User.find({ _id: { $in: agentIds } })
+        : [];
+
+    const assignedIds = [
+      ...new Set(
+        leadDocs
+          .map((l: any) => l.assignedAgent)
+          .filter(Boolean)
+          .map((id: any) => id.toString())
+      ),
+    ].map((id) => new mongoose.Types.ObjectId(id));
+
+    const allUserIds = [...new Set([...paymentAgentIds.map((id: any) => id.toString()), ...assignedIds.map((id) => id.toString())])].map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+
+    const agentDocs =
+      allUserIds.length > 0
+        ? await User.find({ _id: { $in: allUserIds } })
             .select('name email')
             .lean()
-        : [],
-    ]);
+        : [];
 
     const leadById = new Map<string, any>(
       leadDocs.map((l: any) => [l._id.toString(), l] as [string, any])
@@ -506,12 +678,20 @@ export const listPayments = async (req: Request, res: Response) => {
       agentDocs.map((a: any) => [a._id.toString(), a] as [string, any])
     );
 
-    /** Avoid `.populate` on `leadId`: missing Lead docs become `null` and hide name + link. */
+    /** Prefer lead owner (assigned agent) for display — matches how new payments store agentId. */
     const payments = paymentsRaw.map((p: any) => {
       const lid = p.leadId;
       const aid = p.agentId;
       const ldoc = lid ? leadById.get(lid.toString()) : undefined;
-      const adoc = aid ? agentById.get(aid.toString()) : undefined;
+      const assignRaw = ldoc?.assignedAgent;
+      const assignId =
+        assignRaw && typeof assignRaw === 'object' && assignRaw !== null && '_id' in assignRaw
+          ? (assignRaw as { _id: unknown })._id
+          : assignRaw;
+      const assignDoc = assignId ? agentById.get(String(assignId)) : undefined;
+      const payDoc = aid ? agentById.get(aid.toString()) : undefined;
+      const displayDoc = assignDoc ?? payDoc;
+      const displayId = assignId ?? aid;
       return {
         ...p,
         leadId: ldoc
@@ -519,10 +699,10 @@ export const listPayments = async (req: Request, res: Response) => {
           : lid
             ? { _id: lid, name: null, phone: null }
             : null,
-        agentId: adoc
-          ? { _id: aid, name: adoc.name ?? '', email: adoc.email ?? '' }
-          : aid
-            ? { _id: aid, name: null, email: null }
+        agentId: displayDoc
+          ? { _id: displayId, name: displayDoc.name ?? '', email: displayDoc.email ?? '' }
+          : displayId
+            ? { _id: displayId, name: null, email: null }
             : null,
       };
     });

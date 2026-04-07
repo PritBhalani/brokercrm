@@ -12,6 +12,14 @@ export function formatLeadStatus(status: string | undefined | null): string {
       return 'Switch off';
     case 'NumberNotValid':
       return 'Number not valid';
+    case 'WhatsAppMessaged':
+      return 'WhatsApp messaged';
+    case 'Hangup':
+      return 'Hang up';
+    case 'NotInterested':
+      return 'Not interested';
+    case 'CallForward':
+      return 'Call forward';
     default:
       return status;
   }

@@ -75,9 +75,9 @@ export const AgentDrilldown: React.FC = () => {
           </div>
           <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 flex flex-wrap gap-4 justify-between items-center">
             <div>
-              <p className="text-[10px] text-slate-500 uppercase font-bold">Received vs pending</p>
+              <p className="text-[10px] text-slate-500 uppercase font-bold">Received vs pending (today UTC)</p>
               <p className="text-lg font-black text-emerald-400 mt-1">₹{totalReceived.toLocaleString()}</p>
-              <p className="text-xs text-slate-500">pending ₹{totalPending.toLocaleString()}</p>
+              <p className="text-xs text-slate-500">Pending ₹{totalPending.toLocaleString()}</p>
             </div>
             <div className="text-right">
               <p className="text-[10px] text-slate-500 uppercase font-bold">Buy qty (today)</p>
@@ -97,14 +97,14 @@ export const AgentDrilldown: React.FC = () => {
            </div>
            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Total Received</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Received today (UTC)</p>
                 <p className="text-2xl font-black text-emerald-400">₹{totalReceived.toLocaleString()}</p>
               </div>
               <DollarSign className="text-emerald-500/20" size={40} />
            </div>
            <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Total Pending</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Pending today (UTC)</p>
                 <p className="text-2xl font-black text-rose-400">₹{totalPending.toLocaleString()}</p>
               </div>
               <DollarSign className="text-rose-500/20" size={40} />
@@ -193,7 +193,7 @@ export const AgentDrilldown: React.FC = () => {
                 <div>
                   <h4 className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-3 border-b border-emerald-500/20 pb-2">Payments Logged</h4>
                   <div className="space-y-2">
-                    {[...data.payments.received, ...data.payments.pending].length === 0 ? <p className="text-[10px] text-slate-600 italic">No payments today.</p> : 
+                    {[...data.payments.received, ...data.payments.pending].length === 0 ? <p className="text-[10px] text-slate-600 italic">No payments logged today (UTC).</p> : 
                       [...data.payments.received, ...data.payments.pending].map((p: any, idx: number) => {
                          const isReceived = p.status === 'Received';
                          const lead = p.leadId;

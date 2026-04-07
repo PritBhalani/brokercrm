@@ -11,13 +11,17 @@ import { formatLeadStatus } from '../lib/leadStatusDisplay.ts';
 // Priority sort: Callback → Interested → New → rest
 const PRIORITY_ORDER: Record<string, number> = {
   Callback: 0,
+  CallForward: 0,
   Interested: 1,
   Ringing: 2,
   New: 3,
   ReadyToWorkTomorrow: 4,
-  Converted: 5,
+  WhatsAppMessaged: 5,
+  Converted: 6,
   SwitchOff: 10,
   NumberNotValid: 11,
+  Hangup: 12,
+  NotInterested: 13,
 };
 
 const sortLeads = (leads: any[]) =>
@@ -47,6 +51,10 @@ const STATUS_COLORS: Record<string, string> = {
   Ringing: 'text-sky-400',
   SwitchOff: 'text-slate-400',
   NumberNotValid: 'text-rose-400',
+  WhatsAppMessaged: 'text-green-400',
+  Hangup: 'text-orange-400',
+  NotInterested: 'text-neutral-400',
+  CallForward: 'text-indigo-400',
 };
 
 export const Leads: React.FC = () => {
@@ -367,9 +375,13 @@ export const Leads: React.FC = () => {
             <option value="New">New</option>
             <option value="Interested">Interested</option>
             <option value="Callback">Callback</option>
+            <option value="CallForward">Call forward</option>
             <option value="Ringing">Ringing</option>
             <option value="SwitchOff">Switch off</option>
             <option value="NumberNotValid">Number not valid</option>
+            <option value="WhatsAppMessaged">WhatsApp messaged</option>
+            <option value="Hangup">Hang up</option>
+            <option value="NotInterested">Not interested</option>
             <option value="Converted">Paid client</option>
             <option value="ReadyToWorkTomorrow">Ready Tomorrow</option>
           </select>

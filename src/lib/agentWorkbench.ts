@@ -7,13 +7,17 @@ export function utcDayBounds(d = new Date()) {
 
 const PRIORITY_ORDER: Record<string, number> = {
   Callback: 0,
+  CallForward: 0,
   Interested: 1,
   Ringing: 2,
   New: 3,
   ReadyToWorkTomorrow: 4,
-  Converted: 5,
+  WhatsAppMessaged: 5,
+  Converted: 6,
   SwitchOff: 10,
   NumberNotValid: 11,
+  Hangup: 12,
+  NotInterested: 13,
 };
 
 export function sortLeadsForQueue(leads: any[]) {
